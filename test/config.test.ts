@@ -10,8 +10,16 @@ import {
   addReadPathToConfig,
   addWritePathToConfig,
   DEFAULT_CONFIG,
+  DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS,
   mergeConfigLayers,
 } from "../src/config.ts";
+
+test("omitted permission prompt timeout defaults to ten minutes", () => {
+  const merged = mergeConfigLayers(DEFAULT_CONFIG, {}, {});
+
+  assert.equal(DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS, 600);
+  assert.equal(merged.permissionPromptTimeoutSeconds, DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS);
+});
 
 test("mergeConfigLayers combines configured arrays and deduplicates entries", () => {
   const merged = mergeConfigLayers(
@@ -69,15 +77,18 @@ test("mergeConfigLayers uses defaults only for arrays not configured by either f
     DEFAULT_CONFIG,
     {
       enabled: false,
+      permissionPromptTimeoutSeconds: 30,
       filesystem: { allowWrite: [] },
     },
     {
       enabled: true,
+      permissionPromptTimeoutSeconds: 0,
       allowBrowserProcess: true,
     },
   );
 
   assert.equal(merged.enabled, true);
+  assert.equal(merged.permissionPromptTimeoutSeconds, 0);
   assert.equal(merged.allowBrowserProcess, true);
   assert.deepEqual(merged.filesystem?.allowWrite, []);
   assert.deepEqual(merged.filesystem?.allowRead, DEFAULT_CONFIG.filesystem?.allowRead);

@@ -1,7 +1,7 @@
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Input, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-import { type SandboxConfig } from "./config.ts";
+import { DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS, type SandboxConfig } from "./config.ts";
 import { allowsAllDomains, domainIsAllowed, matchesPattern } from "./policy.ts";
 import { type SessionAllowances } from "./sandbox-runtime.ts";
 
@@ -18,6 +18,25 @@ interface PromptOption {
   action: PermissionChoice;
   confirm?: boolean;
   hint?: string;
+}
+
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+export function permissionPromptTimeoutMs(timeoutSeconds: unknown): number | undefined {
+  const resolvedTimeoutSeconds =
+    timeoutSeconds === undefined ? DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS : timeoutSeconds;
+  if (
+    typeof resolvedTimeoutSeconds !== "number" ||
+    !Number.isFinite(resolvedTimeoutSeconds) ||
+    resolvedTimeoutSeconds <= 0
+  ) {
+    return undefined;
+  }
+  return Math.min(resolvedTimeoutSeconds * 1000, MAX_TIMER_DELAY_MS);
+}
+
+export function permissionPromptRemainingSeconds(deadlineMs: number, nowMs = Date.now()): number {
+  return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
 }
 
 const PERMISSION_OPTIONS: PromptOption[] = [
@@ -45,11 +64,13 @@ export async function showPermissionPrompt(
   title: string,
   originalValue: string,
   validateValue: (value: string) => string | null,
+  timeoutSeconds?: number,
 ): Promise<PermissionPromptResult> {
   if (!ctx.hasUI) return { action: "abort", value: originalValue };
 
   pi.events.emit("request-attention", { message: "Sandbox permission required" });
 
+  const timeoutMs = permissionPromptTimeoutMs(timeoutSeconds);
   const result = await ctx.ui.custom<PermissionPromptResult>((tui, theme, _kb, done) => {
     const input = new Input();
     let selectedIndex = 0;
@@ -57,6 +78,27 @@ export async function showPermissionPrompt(
     let editing = false;
     let componentFocused = false;
     let error: string | null = null;
+    let resolved = false;
+    let remainingSeconds: number | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let countdown: ReturnType<typeof setInterval> | undefined;
+
+    const clearPromptTimers = (): void => {
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+        timeout = undefined;
+      }
+      if (countdown !== undefined) {
+        clearInterval(countdown);
+        countdown = undefined;
+      }
+    };
+    const finish = (result: PermissionPromptResult): void => {
+      if (resolved) return;
+      resolved = true;
+      clearPromptTimers();
+      done(result);
+    };
 
     const selectedOption = (): PromptOption =>
       PERMISSION_OPTIONS[selectedIndex] ?? PERMISSION_OPTIONS[0]!;
@@ -79,7 +121,7 @@ export async function showPermissionPrompt(
     };
     const resolve = (action: PermissionChoice): void => {
       if (action === "abort") {
-        done({ action, value: originalValue });
+        finish({ action, value: originalValue });
         return;
       }
 
@@ -92,8 +134,23 @@ export async function showPermissionPrompt(
         tui.requestRender();
         return;
       }
-      done({ action, value });
+      finish({ action, value });
     };
+
+    if (timeoutMs !== undefined) {
+      const deadlineMs = Date.now() + timeoutMs;
+      remainingSeconds = permissionPromptRemainingSeconds(deadlineMs);
+      timeout = setTimeout(() => resolve("abort"), timeoutMs);
+      countdown = setInterval(
+        () => {
+          const nextRemainingSeconds = permissionPromptRemainingSeconds(deadlineMs);
+          if (nextRemainingSeconds === remainingSeconds) return;
+          remainingSeconds = nextRemainingSeconds;
+          tui.requestRender();
+        },
+        Math.min(1000, timeoutMs),
+      );
+    }
 
     return {
       get focused(): boolean {
@@ -104,7 +161,19 @@ export async function showPermissionPrompt(
         updateFocus();
       },
       render(width: number): string[] {
-        const lines = [truncateToWidth(theme.fg("warning", title), width), ""];
+        const lines = [truncateToWidth(theme.fg("warning", title), width)];
+        if (remainingSeconds !== undefined) {
+          lines.push(
+            truncateToWidth(
+              theme.fg(
+                "warning",
+                `⏳ Auto-abort in ${remainingSeconds}s (permission stays blocked)`,
+              ),
+              width,
+            ),
+          );
+        }
+        lines.push("");
         for (let i = 0; i < PERMISSION_OPTIONS.length; i++) {
           const option = PERMISSION_OPTIONS[i]!;
           const isSelected = i === selectedIndex;
@@ -214,6 +283,9 @@ export async function showPermissionPrompt(
       invalidate(): void {
         input.invalidate();
       },
+      dispose(): void {
+        clearPromptTimers();
+      },
     };
   });
 
@@ -229,6 +301,7 @@ export function promptDomainBlock(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   domain: string,
+  timeoutSeconds?: number,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(
     pi,
@@ -236,6 +309,7 @@ export function promptDomainBlock(
     `🌐 Network blocked: "${domain}" is not in allowedDomains`,
     domain,
     (value) => validRule(value, domainIsAllowed(domain, [value]), `domain "${domain}"`),
+    timeoutSeconds,
   );
 }
 
@@ -243,6 +317,7 @@ export function promptReadBlock(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   path: string,
+  timeoutSeconds?: number,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(
     pi,
@@ -250,6 +325,7 @@ export function promptReadBlock(
     `📖 Read blocked: "${path}" is not in allowRead`,
     path,
     (value) => validRule(value, matchesPattern(path, [value]), `path "${path}"`),
+    timeoutSeconds,
   );
 }
 
@@ -257,6 +333,7 @@ export function promptWriteBlock(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   path: string,
+  timeoutSeconds?: number,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(
     pi,
@@ -264,6 +341,7 @@ export function promptWriteBlock(
     `📝 Write blocked: "${path}" is not in allowWrite`,
     path,
     (value) => validRule(value, matchesPattern(path, [value]), `path "${path}"`),
+    timeoutSeconds,
   );
 }
 
