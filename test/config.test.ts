@@ -12,6 +12,7 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS,
   getConfigPaths,
+  loadConfig,
   mergeConfigLayers,
 } from "../src/config.ts";
 
@@ -168,4 +169,25 @@ test("configured tool policies are additive to built-in policies", () => {
     replace: { access: "write", pathArguments: ["path"] },
     undo_last_replace: { access: "write", pathArguments: ["path"] },
   });
+});
+
+test("getConfigPaths reports the global config file that loadConfig actually protects", () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-sandbox-agent-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "pi-sandbox-project-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+
+  try {
+    const { globalPath, projectPath } = getConfigPaths(projectDir);
+    assert.equal(globalPath, join(agentDir, "sandbox.json"));
+
+    // The reported paths must be the ones write-protected by loadConfig,
+    // otherwise "allow globally" writes to a file that is never read.
+    const denyWrite = loadConfig(projectDir).filesystem?.denyWrite ?? [];
+    assert.ok(denyWrite.includes(globalPath));
+    assert.ok(denyWrite.includes(projectPath));
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
 });
