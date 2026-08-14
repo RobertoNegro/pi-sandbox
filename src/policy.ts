@@ -96,11 +96,16 @@ export function matchesPattern(
   patterns: string[],
   cwd: string = process.cwd(),
 ): boolean {
-  const absolutePath = canonicalizePath(filePath, cwd);
+  // macOS APFS is case-insensitive by default: fold case so that e.g. a write
+  // to ".ENV" still matches the ".env" deny pattern. realpathSync preserves the
+  // on-disk case of existing files and the input case of nonexistent ones, so
+  // canonicalization alone does not normalize case.
+  const fold = (value: string) => (process.platform === "darwin" ? value.toLowerCase() : value);
+  const absolutePath = fold(canonicalizePath(filePath, cwd));
   return patterns.some((pattern) => {
-    const absolutePattern = pattern.includes("*")
-      ? expandPath(pattern, cwd)
-      : canonicalizePath(pattern, cwd);
+    const absolutePattern = fold(
+      pattern.includes("*") ? expandPath(pattern, cwd) : canonicalizePath(pattern, cwd),
+    );
     if (pattern.includes("*")) {
       const escaped = absolutePattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
       return new RegExp(`^${escaped}$`).test(absolutePath);

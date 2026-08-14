@@ -115,6 +115,14 @@ test("relative patterns resolve against the provided cwd, not process.cwd()", ()
   assert.equal(matchesPattern(join(root, "key.pem"), ["*.pem"], root), true);
 });
 
+test("deny patterns fold case on macOS and stay case-sensitive elsewhere", () => {
+  const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-policy-")));
+  const expected = process.platform === "darwin";
+
+  assert.equal(matchesPattern(join(root, ".ENV"), [".env"], root), expected);
+  assert.equal(matchesPattern(join(root, "SECRET.PEM"), ["*.pem"], root), expected);
+});
+
 test("canonicalizes symlinks and nonexistent descendants", () => {
   const root = mkdtempSync(join(tmpdir(), "pi-sandbox-canonical-"));
   const real = join(root, "real");
