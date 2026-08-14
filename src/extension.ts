@@ -1,9 +1,13 @@
 import { SandboxManager } from "@carderne/sandbox-runtime";
-import { type AgentToolResult, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   createBashToolDefinition,
   isToolCallEventType,
   SettingsManager,
+  type AgentToolResult,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type ToolCallEvent,
+  type ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 
@@ -277,7 +281,10 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
-  pi.on("tool_call", async (event, ctx) => {
+  async function handleToolCall(
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+  ): Promise<ToolCallEventResult | undefined> {
     if (!sandboxEnabled) return;
     const config = loadConfig(ctx.cwd);
     if (!config.enabled) return;
@@ -374,6 +381,21 @@ export default function (pi: ExtensionAPI) {
           reason: `Sandbox: write access denied for "${path}" (not in allowWrite)`,
         };
       }
+    }
+  }
+
+  // Fail closed: any unexpected enforcement error (e.g. a throwing prompt UI)
+  // blocks the tool call instead of letting it proceed unchecked.
+  pi.on("tool_call", async (event, ctx) => {
+    try {
+      return await handleToolCall(event, ctx);
+    } catch (error) {
+      return {
+        block: true,
+        reason:
+          `Sandbox: enforcement error, blocking "${event.toolName}" (fail-closed): ` +
+          `${error instanceof Error ? error.message : error}`,
+      };
     }
   });
 

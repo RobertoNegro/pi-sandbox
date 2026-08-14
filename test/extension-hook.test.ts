@@ -103,6 +103,27 @@ test("read outside allowances is blocked (headless prompt aborts)", async (t) =>
   assert.match(result?.reason ?? "", /read access denied/);
 });
 
+test("a throwing prompt UI fails closed", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projA);
+  const ctx = {
+    ...makeCtx(projA),
+    hasUI: true,
+    ui: {
+      ...makeCtx(projA).ui,
+      custom: () => {
+        throw new Error("ui exploded");
+      },
+    },
+  };
+  const result = await handlers.get("tool_call")!(
+    { toolName: "read", input: { path: "/etc/hostname" } },
+    ctx,
+  );
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /fail-closed/);
+});
+
 test("write inside allowWrite is allowed", async (t) => {
   skipIfInactive(t);
   process.chdir(projA);
