@@ -70,7 +70,9 @@ and require the union of all declared path arguments (except for the built-in
 `path` argument). Built-in defaults are used for a
 path or domain array only when neither file configures it — except `denyRead` and
 `denyWrite`, whose built-in defaults always apply (configuration can only add
-denied paths, never remove them).
+denied paths, never remove them). This guarantees the defaults stay in the list;
+what each list then does is unchanged — `denyWrite` is a hard block, while
+`denyRead` is still overridden by `allowRead` (see the precedence rules below).
 
 Note below that the order of precedence for filesystem read and write are opposite.
 
@@ -197,7 +199,9 @@ If neither file configures an array, its built-in defaults apply (see above for
 the defaults). Once an array is configured, only its combined global and local
 entries are used, so an explicit empty array disables that default. The deny
 lists are the exception: `denyRead` and `denyWrite` built-in defaults are a
-security floor and always apply, regardless of configuration. The sandbox
+security floor and always apply, regardless of configuration. That floor only
+guarantees the entries stay in the list — `denyWrite` hard-blocks them, while
+`denyRead` remains overridable by `allowRead`. The sandbox
 config files themselves (`~/.pi/agent/sandbox.json` and `.pi/sandbox.json`)
 are always write-protected, so the agent cannot rewrite its own enforcement
 rules mid-session.
