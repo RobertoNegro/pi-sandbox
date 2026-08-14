@@ -127,3 +127,27 @@ test("permission writers only persist the property being changed", () => {
     },
   });
 });
+
+test("configured tool policies are additive to built-in policies", () => {
+  const merged = mergeConfigLayers(
+    DEFAULT_CONFIG,
+    {
+      toolPolicies: {
+        replace: { access: "write", pathArguments: ["path"] },
+      },
+    },
+    {
+      toolPolicies: {
+        undo_last_replace: { access: "write", pathArguments: ["path"] },
+      },
+    },
+  );
+
+  assert.deepEqual(merged.toolPolicies, {
+    read: { access: "read", pathArguments: ["path"] },
+    write: { access: "write", pathArguments: ["path"] },
+    edit: { access: "write", pathArguments: ["path"] },
+    replace: { access: "write", pathArguments: ["path"] },
+    undo_last_replace: { access: "write", pathArguments: ["path"] },
+  });
+});

@@ -1,11 +1,10 @@
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import { DEFAULT_CONFIG, mergeConfigLayers } from "../src/config.ts";
 import {
   BUILTIN_TOOL_POLICIES,
   canonicalizeToolPath,
@@ -14,30 +13,6 @@ import {
   mergeToolPolicies,
   parseToolPolicies,
 } from "../src/tool-policy.ts";
-
-test("configured tool policies are additive to built-in policies", () => {
-  const merged = mergeConfigLayers(
-    DEFAULT_CONFIG,
-    {
-      toolPolicies: {
-        replace: { access: "write", pathArguments: ["path"] },
-      },
-    },
-    {
-      toolPolicies: {
-        undo_last_replace: { access: "write", pathArguments: ["path"] },
-      },
-    },
-  );
-
-  assert.deepEqual(merged.toolPolicies, {
-    read: { access: "read", pathArguments: ["path"] },
-    write: { access: "write", pathArguments: ["path"] },
-    edit: { access: "write", pathArguments: ["path"] },
-    replace: { access: "write", pathArguments: ["path"] },
-    undo_last_replace: { access: "write", pathArguments: ["path"] },
-  });
-});
 
 test("conflicting policies merge to the stricter write access and require every path", () => {
   const merged = mergeToolPolicies(
@@ -124,4 +99,54 @@ test("tool names cannot mutate policy object prototypes", () => {
   assert.equal(getToolPolicy(parsed, "__proto__")?.access, "write");
   assert.equal(getToolPolicy({}, "toString"), undefined);
   assert.equal(Object.prototype.hasOwnProperty.call(parsed, "constructor"), true);
+});
+
+test("policy merging keeps write access regardless of layer order", () => {
+  const writeFirst = mergeToolPolicies(
+    { copy: { access: "write", pathArguments: ["a"] } },
+    { copy: { access: "read", pathArguments: ["b"] } },
+  );
+  const readOnly = mergeToolPolicies(
+    { copy: { access: "read", pathArguments: ["a"] } },
+    { copy: { access: "read", pathArguments: ["b"] } },
+  );
+
+  assert.equal(writeFirst.copy.access, "write");
+  assert.deepEqual(writeFirst.copy.pathArguments, ["a", "b"]);
+  assert.equal(readOnly.copy.access, "read");
+  assert.deepEqual(readOnly.copy.pathArguments, ["a", "b"]);
+});
+
+test("policy parsing rejects malformed entries and non-record input", () => {
+  assert.deepEqual(parseToolPolicies("nope"), {});
+  assert.deepEqual(parseToolPolicies(["read"]), {});
+  assert.deepEqual(
+    parseToolPolicies({
+      "": { access: "read", pathArguments: ["path"] },
+      "   ": { access: "read", pathArguments: ["path"] },
+      whitespaceArg: { access: "read", pathArguments: ["  "] },
+      nonStringArg: { access: "read", pathArguments: [42] },
+    }),
+    {},
+  );
+});
+
+test("path extraction deduplicates identical argument values", () => {
+  const policy = { access: "write" as const, pathArguments: ["source", "destination"] };
+
+  assert.deepEqual(extractToolPaths({ source: "same", destination: "same" }, policy), {
+    ok: true,
+    paths: ["same"],
+  });
+});
+
+test("canonicalizeToolPath handles tilde, absolute, and nonexistent paths", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-sandbox-tool-policy-"));
+
+  assert.equal(canonicalizeToolPath("~", root), realpathSync(homedir()));
+  assert.equal(canonicalizeToolPath("/etc/hostname", root), realpathSync("/etc/hostname"));
+  assert.equal(
+    canonicalizeToolPath("does/not/exist.txt", root),
+    join(realpathSync(root), "does", "not", "exist.txt"),
+  );
 });
