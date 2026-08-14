@@ -126,12 +126,18 @@ export function mergeConfigLayers(
     },
     filesystem: {
       ...merged.filesystem,
-      denyRead:
-        mergeConfiguredArray(
-          defaults.filesystem?.denyRead,
-          globalConfig.filesystem?.denyRead,
-          projectConfig.filesystem?.denyRead,
-        ) ?? [],
+      // Deny lists are a security floor: built-in defaults always apply and
+      // configuration can only add entries, never remove them.
+      denyRead: [
+        ...new Set([
+          ...(defaults.filesystem?.denyRead ?? []),
+          ...(mergeConfiguredArray(
+            [],
+            globalConfig.filesystem?.denyRead,
+            projectConfig.filesystem?.denyRead,
+          ) ?? []),
+        ]),
+      ],
       allowRead: mergeConfiguredArray(
         defaults.filesystem?.allowRead,
         globalConfig.filesystem?.allowRead,
@@ -143,12 +149,16 @@ export function mergeConfigLayers(
           globalConfig.filesystem?.allowWrite,
           projectConfig.filesystem?.allowWrite,
         ) ?? [],
-      denyWrite:
-        mergeConfiguredArray(
-          defaults.filesystem?.denyWrite,
-          globalConfig.filesystem?.denyWrite,
-          projectConfig.filesystem?.denyWrite,
-        ) ?? [],
+      denyWrite: [
+        ...new Set([
+          ...(defaults.filesystem?.denyWrite ?? []),
+          ...(mergeConfiguredArray(
+            [],
+            globalConfig.filesystem?.denyWrite,
+            projectConfig.filesystem?.denyWrite,
+          ) ?? []),
+        ]),
+      ],
     },
   };
 }

@@ -60,7 +60,11 @@ test("mergeConfigLayers combines configured arrays and deduplicates entries", ()
   ]);
   assert.deepEqual(merged.network?.allowUnixSockets, ["/global.sock", "/project.sock"]);
   assert.deepEqual(merged.filesystem?.allowRead, ["/global", "/shared", "/project"]);
-  assert.deepEqual(merged.filesystem?.denyWrite, ["global.key", "project.key"]);
+  assert.deepEqual(merged.filesystem?.denyWrite, [
+    ...(DEFAULT_CONFIG.filesystem?.denyWrite ?? []),
+    "global.key",
+    "project.key",
+  ]);
 });
 
 test("mergeConfigLayers ignores malformed permission arrays", () => {
@@ -71,6 +75,20 @@ test("mergeConfigLayers ignores malformed permission arrays", () => {
   );
 
   assert.deepEqual(merged.filesystem?.denyWrite, DEFAULT_CONFIG.filesystem?.denyWrite);
+});
+
+test("deny lists are a floor: configuration can only add, never remove", () => {
+  const merged = mergeConfigLayers(
+    DEFAULT_CONFIG,
+    { filesystem: { denyRead: [], denyWrite: [] } },
+    { filesystem: { denyWrite: ["secrets/**"] } },
+  );
+
+  assert.deepEqual(merged.filesystem?.denyRead, DEFAULT_CONFIG.filesystem?.denyRead);
+  assert.deepEqual(merged.filesystem?.denyWrite, [
+    ...(DEFAULT_CONFIG.filesystem?.denyWrite ?? []),
+    "secrets/**",
+  ]);
 });
 
 test("mergeConfigLayers uses defaults only for arrays not configured by either file", () => {

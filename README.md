@@ -68,7 +68,9 @@ combined additively with the built-in policies; conflicting entries use `write` 
 and require the union of all declared path arguments (except for the built-in
 `read`/`write`/`edit` tools, whose configured path arguments replace the default
 `path` argument). Built-in defaults are used for a
-path or domain array only when neither file configures it.
+path or domain array only when neither file configures it — except `denyRead` and
+`denyWrite`, whose built-in defaults always apply (configuration can only add
+denied paths, never remove them).
 
 Note below that the order of precedence for filesystem read and write are opposite.
 
@@ -193,7 +195,9 @@ that discovers the temporary proxy port can use it while the sandbox is running.
 
 If neither file configures an array, its built-in defaults apply (see above for
 the defaults). Once an array is configured, only its combined global and local
-entries are used, so an explicit empty array disables that default.
+entries are used, so an explicit empty array disables that default. The deny
+lists are the exception: `denyRead` and `denyWrite` built-in defaults are a
+security floor and always apply, regardless of configuration.
 
 The footer shows a lock indicator while the sandbox is active.
 
