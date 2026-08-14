@@ -188,7 +188,18 @@ export function loadConfig(cwd: string): SandboxConfig {
   const { globalPath, projectPath } = getConfigPaths(cwd);
   const globalConfig = readJsonConfig(globalPath, true);
   const projectConfig = readJsonConfig(projectPath, true);
-  return mergeConfigLayers(DEFAULT_CONFIG, globalConfig, projectConfig);
+  const merged = mergeConfigLayers(DEFAULT_CONFIG, globalConfig, projectConfig);
+
+  return {
+    ...merged,
+    filesystem: {
+      ...merged.filesystem,
+      // The config files themselves are always write-protected: loadConfig is
+      // re-evaluated on every tool call, so a writable config would let the
+      // agent disable its own enforcement mid-session.
+      denyWrite: [...new Set([...(merged.filesystem?.denyWrite ?? []), globalPath, projectPath])],
+    },
+  };
 }
 
 function writeConfigFile(configPath: string, config: SandboxConfigFile): void {

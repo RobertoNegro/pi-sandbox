@@ -197,7 +197,10 @@ If neither file configures an array, its built-in defaults apply (see above for
 the defaults). Once an array is configured, only its combined global and local
 entries are used, so an explicit empty array disables that default. The deny
 lists are the exception: `denyRead` and `denyWrite` built-in defaults are a
-security floor and always apply, regardless of configuration.
+security floor and always apply, regardless of configuration. The sandbox
+config files themselves (`~/.pi/agent/sandbox.json` and `.pi/sandbox.json`)
+are always write-protected, so the agent cannot rewrite its own enforcement
+rules mid-session.
 
 The footer shows a lock indicator while the sandbox is active.
 

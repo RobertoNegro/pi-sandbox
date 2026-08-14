@@ -117,6 +117,16 @@ test("write to a denyWrite path is a hard block", async (t) => {
   assert.match(result?.reason ?? "", /denyWrite/);
 });
 
+test("the sandbox config file itself is write-protected", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projA);
+  const result = await toolCall(projA, "write", {
+    path: join(".pi", "sandbox.json"),
+  });
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /denyWrite/);
+});
+
 test("edit escaping the project is blocked", async (t) => {
   skipIfInactive(t);
   process.chdir(projA);
