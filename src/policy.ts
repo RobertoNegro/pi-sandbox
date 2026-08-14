@@ -41,6 +41,30 @@ export async function resolveWritePermission({
   return { action: "granted", value: choice.value };
 }
 
+export function findExplicitAskRule(
+  path: string,
+  askRules: string[],
+  approvedRules: string[],
+  matches: (path: string, patterns: string[]) => boolean,
+): string | undefined {
+  const matchingRules = askRules.filter((rule) => matches(path, [rule]));
+  const specificity = (rule: string): number =>
+    rule.replaceAll("*", "").replaceAll("?", "").replaceAll("[", "").replaceAll("]", "").length;
+  matchingRules.sort((left, right) => specificity(right) - specificity(left));
+
+  const rule = matchingRules[0];
+  return rule !== undefined && !approvedRules.includes(rule) ? rule : undefined;
+}
+
+export function unsupportedLinuxDenyWritePatterns(patterns: string[]): string[] {
+  return patterns.filter((pattern) => {
+    // A trailing /** is supported as recursive directory access: sandbox-runtime
+    // strips the suffix before giving the concrete directory to bubblewrap.
+    const withoutRecursiveSuffix = pattern.replace(/\/\*\*$/, "");
+    return ["*", "?", "[", "]"].some((character) => withoutRecursiveSuffix.includes(character));
+  });
+}
+
 export function extractDomainsFromCommand(command: string): string[] {
   const urlRegex = /https?:\/\/([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
   const domains = new Set<string>();

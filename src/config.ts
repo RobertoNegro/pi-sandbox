@@ -6,7 +6,16 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import { BUILTIN_TOOL_POLICIES, mergeToolPolicies, type ToolPolicies } from "./tool-policy.ts";
 
-export type SandboxConfig = Omit<SandboxRuntimeConfig, "network"> & {
+type RuntimeFilesystemConfig = NonNullable<SandboxRuntimeConfig["filesystem"]>;
+
+export type FilesystemConfig = RuntimeFilesystemConfig & {
+  /** Paths that configured read tools must ask about before execution. */
+  askRead?: string[];
+  /** Paths that configured write tools must ask about before execution. */
+  askWrite?: string[];
+};
+
+export type SandboxConfig = Omit<SandboxRuntimeConfig, "network" | "filesystem"> & {
   enabled?: boolean;
   permissionPromptTimeoutSeconds?: number;
   network?: NonNullable<SandboxRuntimeConfig["network"]> & {
@@ -14,11 +23,11 @@ export type SandboxConfig = Omit<SandboxRuntimeConfig, "network"> & {
     /** Route ordinary `ssh` commands through the sandbox SOCKS proxy. */
     sshProxy?: boolean;
   };
+  filesystem?: FilesystemConfig;
   toolPolicies?: ToolPolicies;
 };
 
 type NetworkConfig = NonNullable<SandboxConfig["network"]>;
-type FilesystemConfig = NonNullable<SandboxConfig["filesystem"]>;
 
 export type SandboxConfigFile = Omit<Partial<SandboxConfig>, "network" | "filesystem"> & {
   network?: Partial<NetworkConfig>;
@@ -49,8 +58,10 @@ export const DEFAULT_CONFIG: SandboxConfig = {
   },
   filesystem: {
     denyRead: ["/Users", "/home"],
+    askRead: [],
     allowRead: [".", "~/.config", "~/.local", "Library"],
     allowWrite: [".", "/tmp"],
+    askWrite: [],
     denyWrite: [".env", ".env.*", "*.pem", "*.key"],
   },
   toolPolicies: BUILTIN_TOOL_POLICIES,
@@ -138,11 +149,23 @@ export function mergeConfigLayers(
           ) ?? []),
         ]),
       ],
+      askRead:
+        mergeConfiguredArray(
+          defaults.filesystem?.askRead,
+          globalConfig.filesystem?.askRead,
+          projectConfig.filesystem?.askRead,
+        ) ?? [],
       allowRead: mergeConfiguredArray(
         defaults.filesystem?.allowRead,
         globalConfig.filesystem?.allowRead,
         projectConfig.filesystem?.allowRead,
       ),
+      askWrite:
+        mergeConfiguredArray(
+          defaults.filesystem?.askWrite,
+          globalConfig.filesystem?.askWrite,
+          projectConfig.filesystem?.askWrite,
+        ) ?? [],
       allowWrite:
         mergeConfiguredArray(
           defaults.filesystem?.allowWrite,
@@ -194,6 +217,8 @@ export function loadConfig(cwd: string): SandboxConfig {
     ...merged,
     filesystem: {
       ...merged.filesystem,
+      denyRead: merged.filesystem?.denyRead ?? [],
+      allowWrite: merged.filesystem?.allowWrite ?? [],
       // The config files themselves are always write-protected: loadConfig is
       // re-evaluated on every tool call, so a writable config would let the
       // agent disable its own enforcement mid-session.

@@ -22,8 +22,10 @@ import {
   canonicalizePath,
   domainIsAllowed,
   extractDomainsFromCommand,
+  findExplicitAskRule,
   matchesPattern,
   resolveWritePermission,
+  unsupportedLinuxDenyWritePatterns,
 } from "./policy.ts";
 import {
   createSandboxedBashOps,
@@ -127,6 +129,18 @@ export default function (pi: ExtensionAPI) {
       }
       sandboxEnabled = true;
       sandboxInitialized = true;
+      if (platform === "linux") {
+        const unsupportedPatterns = unsupportedLinuxDenyWritePatterns(
+          config.filesystem?.denyWrite ?? [],
+        );
+        if (unsupportedPatterns.length > 0) {
+          ctx.ui.notify(
+            `Sandbox: Linux OS-level denyWrite does not support these glob patterns: ${unsupportedPatterns.map((pattern) => JSON.stringify(pattern)).join(", ")}. ` +
+              "They are not enforced for bash; use literal paths for OS-level enforcement.",
+            "warning",
+          );
+        }
+      }
       warnIfAllDomainsAllowed(ctx, config);
       updateStatus(ctx, config);
       return true;
@@ -341,7 +355,32 @@ export default function (pi: ExtensionAPI) {
 
     if (toolPolicy.access === "read") {
       for (const path of paths) {
-        if (matchesPattern(path, effectiveReadPaths(ctx.cwd), ctx.cwd)) continue;
+        const readPaths = effectiveReadPaths(ctx.cwd);
+        const askRule = findExplicitAskRule(
+          path,
+          config.filesystem?.askRead ?? [],
+          readPaths,
+          (target, patterns) => matchesPattern(target, patterns, ctx.cwd),
+        );
+        if (askRule) {
+          const choice = await promptReadBlock(
+            pi,
+            ctx,
+            path,
+            config.permissionPromptTimeoutSeconds,
+            askRule,
+          );
+          if (choice.action === "abort") {
+            return {
+              block: true,
+              reason: `Sandbox: read access denied for "${path}" (in askRead)`,
+            };
+          }
+          await applyChoice(choice.action, "read", choice.value, ctx.cwd);
+          continue;
+        }
+
+        if (matchesPattern(path, readPaths, ctx.cwd)) continue;
 
         const choice = await promptReadBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds);
         if (choice.action === "abort") {
@@ -367,9 +406,36 @@ export default function (pi: ExtensionAPI) {
     }
 
     for (const path of paths) {
+      const writePaths = effectiveWritePaths(ctx.cwd);
+      // An explicit askWrite rule takes precedence over a broader allowWrite
+      // entry, so it is checked before the ordinary allow/deny resolution.
+      const askRule = findExplicitAskRule(
+        path,
+        config.filesystem?.askWrite ?? [],
+        writePaths,
+        (target, patterns) => matchesPattern(target, patterns, ctx.cwd),
+      );
+      if (askRule) {
+        const choice = await promptWriteBlock(
+          pi,
+          ctx,
+          path,
+          config.permissionPromptTimeoutSeconds,
+          askRule,
+        );
+        if (choice.action === "abort") {
+          return {
+            block: true,
+            reason: `Sandbox: write access denied for "${path}" (in askWrite)`,
+          };
+        }
+        await applyChoice(choice.action, "write", choice.value, ctx.cwd);
+        continue;
+      }
+
       const writePermission = await resolveWritePermission({
         path,
-        allowWrite: effectiveWritePaths(ctx.cwd),
+        allowWrite: writePaths,
         denyWrite,
         cwd: ctx.cwd,
         prompt: (path) => promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),

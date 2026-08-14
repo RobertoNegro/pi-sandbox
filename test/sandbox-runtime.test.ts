@@ -12,7 +12,15 @@ import {
 } from "../src/sandbox-runtime.ts";
 
 test("buildRuntimeConfig adds session allowances without mutating config", () => {
-  const runtime = buildRuntimeConfig(DEFAULT_CONFIG, {
+  const config = {
+    ...DEFAULT_CONFIG,
+    filesystem: {
+      ...DEFAULT_CONFIG.filesystem!,
+      askRead: ["private/read.txt"],
+      askWrite: ["private/write.txt"],
+    },
+  };
+  const runtime = buildRuntimeConfig(config, {
     domains: ["example.com"],
     readPaths: ["/read"],
     writePaths: ["/write"],
@@ -22,6 +30,10 @@ test("buildRuntimeConfig adds session allowances without mutating config", () =>
   assert.equal(runtime.filesystem?.allowRead?.includes("/write"), true);
   assert.equal(runtime.filesystem?.allowWrite?.includes("/write"), true);
   assert.equal(DEFAULT_CONFIG.network?.allowedDomains?.includes("example.com"), false);
+  assert.equal("askRead" in (runtime.filesystem ?? {}), false);
+  assert.equal("askWrite" in (runtime.filesystem ?? {}), false);
+  assert.deepEqual(config.filesystem.askRead, ["private/read.txt"]);
+  assert.deepEqual(config.filesystem.askWrite, ["private/write.txt"]);
 });
 
 test("buildRuntimeConfig canonicalizes non-glob filesystem paths", () => {

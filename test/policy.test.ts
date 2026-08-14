@@ -11,8 +11,10 @@ import {
   decideWritePolicy,
   domainIsAllowed,
   extractDomainsFromCommand,
+  findExplicitAskRule,
   matchesPattern,
   resolveWritePermission,
+  unsupportedLinuxDenyWritePatterns,
 } from "../src/policy.ts";
 
 test("extracts and deduplicates literal HTTP domains", () => {
@@ -98,6 +100,44 @@ test("resolves write permission prompt choices", async () => {
     { action: "granted", value: "/tmp" },
   );
   assert.deepEqual(applied, ["session:/tmp"]);
+});
+
+test("explicit ask chooses the most-specific rule and an exact approval suppresses it", () => {
+  const matches = (path: string, patterns: string[]) =>
+    matchesPattern(path, patterns, "/workspace");
+  const rules = ["secrets", "secrets/public.json"];
+
+  assert.equal(
+    findExplicitAskRule("/workspace/secrets/public.json", rules, ["."], matches),
+    "secrets/public.json",
+  );
+  assert.equal(
+    findExplicitAskRule(
+      "/workspace/secrets/public.json",
+      rules,
+      [".", "secrets/public.json"],
+      matches,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findExplicitAskRule("/workspace/secrets/private.json", rules, ["secrets/public.json"], matches),
+    "secrets",
+  );
+});
+
+test("detects denyWrite patterns unsupported by Linux bubblewrap", () => {
+  assert.deepEqual(
+    unsupportedLinuxDenyWritePatterns([
+      ".env",
+      ".env.*",
+      "*.pem",
+      "config/file?.json",
+      "secrets/[ab].key",
+      "cache/**",
+    ]),
+    [".env.*", "*.pem", "config/file?.json", "secrets/[ab].key"],
+  );
 });
 
 test("path patterns support directory prefixes and globs", () => {

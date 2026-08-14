@@ -93,3 +93,56 @@ test(
     assert.deepEqual(result, { action: "abort", value: "example.test" });
   },
 );
+
+test("fixed permission prompts keep the approval rule non-editable", async () => {
+  type TestComponent = {
+    render(width: number): string[];
+    handleInput?(data: string): void;
+    dispose?(): void;
+  };
+  type PromptFactory<T> = (
+    tui: { requestRender(): void },
+    theme: { fg(color: string, text: string): string },
+    keybindings: object,
+    done: (result: T) => void,
+  ) => TestComponent;
+
+  let renderedLines: string[] = [];
+  const pi = { events: { emit: () => undefined } } as unknown as ExtensionAPI;
+  const ctx = {
+    hasUI: true,
+    ui: {
+      custom: <T>(factory: PromptFactory<T>): Promise<T> =>
+        new Promise<T>((resolve) => {
+          let component: TestComponent | undefined;
+          const done = (result: T): void => {
+            component?.dispose?.();
+            resolve(result);
+          };
+          component = factory(
+            { requestRender: () => undefined },
+            { fg: (_color, text) => text },
+            {},
+            done,
+          );
+          component.handleInput?.("\t");
+          renderedLines = component.render(100);
+          component.handleInput?.("s");
+        }),
+    },
+  } as unknown as ExtensionContext;
+
+  const result = await showPermissionPrompt(
+    pi,
+    ctx,
+    "Explicit ask",
+    "secrets/public.json",
+    () => null,
+    0,
+    { editable: false },
+  );
+
+  assert.deepEqual(result, { action: "session", value: "secrets/public.json" });
+  assert.ok(renderedLines.some((line) => line.includes("enter select")));
+  assert.ok(renderedLines.every((line) => !line.includes("tab edit")));
+});

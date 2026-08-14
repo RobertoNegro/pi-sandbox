@@ -92,15 +92,19 @@ Note below that the order of precedence for filesystem read and write are opposi
     // For READS:
     // - ANY read is prompted unless the path is in allowRead or allowWrite
     // - Granting a prompt adds to allowRead, which overrides denyRead
+    // - askRead forces configured Pi read tools to prompt even inside a broader allow
     // - denyRead is not a hard-block; it just marks regions as denied by default
     "denyRead": ["/Users", "/home"],
+    "askRead": ["secrets/public.json"],
     "allowRead": [".", "~/.config", "~/.local", "Library"],
 
     // For WRITES:
     // - allowWrite also grants read access to the same paths
     // - empty ALLOW means no write access at all
+    // - askWrite forces configured Pi write tools to prompt even inside a broader allow
     // - DENY takes precedence and is never prompted
     "allowWrite": [".", "/tmp"],
+    "askWrite": ["config/generated.json"],
     "denyWrite": [".env", ".env.*", "*.pem", "*.key"]
   },
   "toolPolicies": {
@@ -123,6 +127,14 @@ Tools with implicit filesystem side effects, nested calls, or paths that are not
 present in their input cannot be secured through `toolPolicies`. The `bash` tool is
 excluded from `toolPolicies`; its filesystem access is enforced by the OS-level
 sandbox.
+
+`askRead` and `askWrite` are explicit pre-execution gates for configured Pi tools
+only. The most-specific matching ask rule is shown as a fixed approval unit: it
+cannot be edited in the prompt. A session approval records that rule in memory;
+project/global approvals add the same rule to `allowRead`/`allowWrite`, suppressing
+repeat prompts without letting a broader existing allow bypass the ask. `denyWrite`
+still wins and is never askable. These ask lists do not change bash or `!cmd` OS
+sandbox behavior.
 
 #### Usage
 
@@ -167,14 +179,23 @@ extension reloads or pi restarts.
 | Rule | Behaviour |
 |------|-----------|
 | Domain not in `allowedDomains` | Prompted (bash and `!cmd`) |
+| Path matching `askRead` | Prompted before configured Pi read tools execute, even inside broader allows |
+| Path matching `askWrite` | Prompted before configured Pi write tools execute, even inside broader allows |
 | Path not in `allowRead` or `allowWrite` | Prompted (tools with `read` access); granting adds to `allowRead` |
 | Path not in `allowWrite` | Prompted (tools with `write` access and bash write failures) |
-| Path in `denyWrite` | Hard-blocked, no prompt |
+| Path in `denyWrite` | Hard-blocked, no prompt (`denyWrite` wins over `askWrite`) |
 | Domain in `deniedDomains` | Hard-blocked at OS level, no prompt |
 
 If a path is added to `allowWrite` via a prompt but is also present in
 `denyWrite`, it remains blocked. A warning is shown explaining which config
 files to check.
+
+> **Linux `denyWrite` glob limitation:** bubblewrap enforces write restrictions
+> with mounts on concrete paths, so patterns containing `*`, `?`, `[` or `]`
+> are not OS-level hard blocks for bash. A trailing `/**` is the exception: it
+> is treated as recursive access to the concrete directory before the policy is
+> passed to bubblewrap. Use literal paths to protect files on Linux. pi-sandbox
+> shows an initialization warning listing unsupported `denyWrite` patterns.
 
 `allowedDomains` supports `*.example.com` wildcards. It also supports `"*"` to
 allow all domains; pi-sandbox shows a warning when this is configured because it

@@ -70,6 +70,8 @@ export function buildRuntimeConfig(
       deniedDomains: config.network?.deniedDomains ?? [],
     },
     filesystem: {
+      // Every runtime key is listed explicitly: askRead/askWrite are enforced
+      // in-process for configured tools and must never reach the OS sandbox.
       disabled: config.filesystem?.disabled,
       denyRead: canonicalizeFilesystemPatterns(config.filesystem?.denyRead ?? []),
       allowRead: canonicalizeFilesystemPatterns(effective.readPaths),

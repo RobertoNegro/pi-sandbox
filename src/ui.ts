@@ -72,13 +72,15 @@ export async function showPermissionPrompt(
   originalValue: string,
   validateValue: (value: string) => string | null,
   timeoutSeconds?: number,
+  options: { editable?: boolean } = {},
 ): Promise<PermissionPromptResult> {
   if (!ctx.hasUI) return { action: "abort", value: originalValue };
 
   pi.events.emit("request-attention", { message: "Sandbox permission required" });
 
   const timeoutMs = permissionPromptTimeoutMs(timeoutSeconds);
-  const options = permissionOptions(ctx.cwd);
+  const promptOptions = permissionOptions(ctx.cwd);
+  const editableValue = options.editable ?? true;
   const result = await ctx.ui.custom<PermissionPromptResult>((tui, theme, _kb, done) => {
     const input = new Input();
     let selectedIndex = 0;
@@ -108,12 +110,13 @@ export async function showPermissionPrompt(
       done(result);
     };
 
-    const selectedOption = (): PromptOption => options[selectedIndex] ?? options[0]!;
+    const selectedOption = (): PromptOption => promptOptions[selectedIndex] ?? promptOptions[0]!;
     const isAllowOption = (option: PromptOption): boolean => option.action !== "abort";
     const updateFocus = (): void => {
       input.focused = componentFocused && editing;
     };
     const beginEditing = (): void => {
+      if (!editableValue) return;
       input.setValue(originalValue);
       input.handleInput("\x05");
       editing = true;
@@ -135,6 +138,10 @@ export async function showPermissionPrompt(
       const value = editing ? input.getValue().trim() : originalValue;
       const validationError = validateValue(value);
       if (validationError) {
+        if (!editableValue) {
+          finish({ action: "abort", value: originalValue });
+          return;
+        }
         error = validationError;
         editing = true;
         updateFocus();
@@ -181,8 +188,8 @@ export async function showPermissionPrompt(
           );
         }
         lines.push("");
-        for (let i = 0; i < options.length; i++) {
-          const option = options[i]!;
+        for (let i = 0; i < promptOptions.length; i++) {
+          const option = promptOptions[i]!;
           const isSelected = i === selectedIndex;
           const prefix = isSelected ? " → " : "   ";
           const keyHint = theme.fg("accent", `[${option.key}]`);
@@ -210,8 +217,12 @@ export async function showPermissionPrompt(
         const footer = editing
           ? "↑↓ navigate, enter confirm, esc reset, ctrl+c cancel"
           : pendingAction
-            ? "↑↓ navigate, tab edit, enter confirm, esc/ctrl+c cancel"
-            : "↑↓ navigate, tab edit, enter select, esc/ctrl+c cancel";
+            ? editableValue
+              ? "↑↓ navigate, tab edit, enter confirm, esc/ctrl+c cancel"
+              : "↑↓ navigate, enter confirm, esc/ctrl+c cancel"
+            : editableValue
+              ? "↑↓ navigate, tab edit, enter select, esc/ctrl+c cancel"
+              : "↑↓ navigate, enter select, esc/ctrl+c cancel";
         lines.push(truncateToWidth(theme.fg("dim", footer), width));
         return lines;
       },
@@ -232,7 +243,7 @@ export async function showPermissionPrompt(
           }
           if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
             const delta = matchesKey(data, Key.up) ? -1 : 1;
-            selectedIndex = Math.max(0, Math.min(options.length - 1, selectedIndex + delta));
+            selectedIndex = Math.max(0, Math.min(promptOptions.length - 1, selectedIndex + delta));
             pendingAction = null;
             stopEditing();
             tui.requestRender();
@@ -247,7 +258,7 @@ export async function showPermissionPrompt(
           resolve("abort");
           return;
         }
-        if (matchesKey(data, Key.tab) && isAllowOption(selectedOption())) {
+        if (editableValue && matchesKey(data, Key.tab) && isAllowOption(selectedOption())) {
           beginEditing();
           tui.requestRender();
           return;
@@ -258,13 +269,13 @@ export async function showPermissionPrompt(
         }
         if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
           const delta = matchesKey(data, Key.up) ? -1 : 1;
-          selectedIndex = Math.max(0, Math.min(options.length - 1, selectedIndex + delta));
+          selectedIndex = Math.max(0, Math.min(promptOptions.length - 1, selectedIndex + delta));
           pendingAction = null;
           tui.requestRender();
           return;
         }
-        for (let i = 0; i < options.length; i++) {
-          const option = options[i]!;
+        for (let i = 0; i < promptOptions.length; i++) {
+          const option = promptOptions[i]!;
           if (data === option.key) {
             resolve(option.action);
             return;
@@ -319,14 +330,18 @@ export function promptReadBlock(
   ctx: ExtensionContext,
   path: string,
   timeoutSeconds?: number,
+  askRule?: string,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(
     pi,
     ctx,
-    `📖 Read blocked: "${path}" is not in allowRead`,
-    path,
+    askRule
+      ? `📖 Read approval required: "${path}" matches askRead rule "${askRule}"`
+      : `📖 Read blocked: "${path}" is not in allowRead`,
+    askRule ?? path,
     (value) => validRule(value, matchesPattern(path, [value], ctx.cwd), `path "${path}"`),
     timeoutSeconds,
+    { editable: askRule === undefined },
   );
 }
 
@@ -335,14 +350,18 @@ export function promptWriteBlock(
   ctx: ExtensionContext,
   path: string,
   timeoutSeconds?: number,
+  askRule?: string,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(
     pi,
     ctx,
-    `📝 Write blocked: "${path}" is not in allowWrite`,
-    path,
+    askRule
+      ? `📝 Write approval required: "${path}" matches askWrite rule "${askRule}"`
+      : `📝 Write blocked: "${path}" is not in allowWrite`,
+    askRule ?? path,
     (value) => validRule(value, matchesPattern(path, [value], ctx.cwd), `path "${path}"`),
     timeoutSeconds,
+    { editable: askRule === undefined },
   );
 }
 
@@ -390,8 +409,10 @@ export function formatSandboxConfiguration(
     "",
     "Filesystem (bash + configured tools):",
     `  Deny Read:   ${config.filesystem?.denyRead?.join(", ") || "(none)"}`,
+    `  Ask Read:    ${config.filesystem?.askRead?.join(", ") || "(none)"}`,
     `  Allow Read:  ${config.filesystem?.allowRead?.join(", ") || "(none)"}`,
     `  Allow Write: ${config.filesystem?.allowWrite?.join(", ") || "(none)"}`,
+    `  Ask Write:   ${config.filesystem?.askWrite?.join(", ") || "(none)"}`,
     `  Deny Write:  ${config.filesystem?.denyWrite?.join(", ") || "(none)"}`,
     ...(allowances.readPaths.length ? [`  Session read:  ${allowances.readPaths.join(", ")}`] : []),
     ...(allowances.writePaths.length
@@ -400,6 +421,8 @@ export function formatSandboxConfiguration(
     `  Read tools:  ${readTools.join(", ") || "(none)"}`,
     `  Write tools: ${writeTools.join(", ") || "(none)"}`,
     "",
+    "Note: askRead/askWrite apply only to configured Pi tools, before execution (not bash).",
+    "Note: explicit ask rules override broader allow rules; approving grants the matched ask rule.",
     "Note: ALL reads are prompted unless the path is in allowRead or allowWrite.",
     "Note: allowWrite also grants read access to the same path.",
     "Note: denyRead is not a hard-block — granting a prompt adds to allowRead, overriding denyRead.",

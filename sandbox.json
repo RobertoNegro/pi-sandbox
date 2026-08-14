@@ -22,6 +22,7 @@
     "denyRead": [
       "/Users"
     ],
+    "askRead": [],
     "allowRead": [
       ".",
       "~/projects",
@@ -33,6 +34,7 @@
       "/Applications/Google Chrome.app",
       "/System/Volumes/Data/Applications/Google Chrome.app"
     ],
+    "askWrite": [],
     "allowWrite": [
       ".",
       "/tmp",

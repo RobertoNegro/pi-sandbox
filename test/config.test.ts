@@ -33,7 +33,9 @@ test("mergeConfigLayers combines configured arrays and deduplicates entries", ()
         allowUnixSockets: ["/global.sock"],
       },
       filesystem: {
+        askRead: ["/global-ask", "/shared-ask"],
         allowRead: ["/global", "/shared"],
+        askWrite: ["global.prompt", "shared.prompt"],
         denyWrite: ["global.key"],
       },
     },
@@ -44,7 +46,9 @@ test("mergeConfigLayers combines configured arrays and deduplicates entries", ()
         allowUnixSockets: ["/project.sock"],
       },
       filesystem: {
+        askRead: ["/project-ask", "/shared-ask"],
         allowRead: ["/project", "/shared"],
+        askWrite: ["project.prompt", "shared.prompt"],
         denyWrite: ["project.key"],
       },
     },
@@ -60,7 +64,13 @@ test("mergeConfigLayers combines configured arrays and deduplicates entries", ()
     "project-blocked.example.com",
   ]);
   assert.deepEqual(merged.network?.allowUnixSockets, ["/global.sock", "/project.sock"]);
+  assert.deepEqual(merged.filesystem?.askRead, ["/global-ask", "/shared-ask", "/project-ask"]);
   assert.deepEqual(merged.filesystem?.allowRead, ["/global", "/shared", "/project"]);
+  assert.deepEqual(merged.filesystem?.askWrite, [
+    "global.prompt",
+    "shared.prompt",
+    "project.prompt",
+  ]);
   assert.deepEqual(merged.filesystem?.denyWrite, [
     ...(DEFAULT_CONFIG.filesystem?.denyWrite ?? []),
     "global.key",

@@ -41,6 +41,28 @@ function makeCtx(cwd: string) {
   };
 }
 
+function makeApprovingCtx(cwd: string, onPrompt: () => void) {
+  const ctx = makeCtx(cwd);
+  return {
+    ...ctx,
+    hasUI: true,
+    ui: {
+      ...ctx.ui,
+      custom: <T>(factory: any): Promise<T> =>
+        new Promise<T>((resolve) => {
+          const component = factory(
+            { requestRender: () => {} },
+            { fg: (_color: string, text: string) => text },
+            {},
+            resolve,
+          );
+          onPrompt();
+          component.handleInput?.("s");
+        }),
+    },
+  };
+}
+
 function makeProject(name: string, config: object): string {
   const dir = mkdtempSync(join(tmpdir(), `pi-sandbox-hook-${name}-`));
   mkdirSync(join(dir, ".pi"), { recursive: true });
@@ -69,6 +91,15 @@ const projB = makeProject("b", {
     mcp_move: { access: "write", pathArguments: ["source", "destination"] },
   },
 });
+// Project C: explicit asks must override broad ordinary allows for configured tools.
+const projC = makeProject("c", {
+  enabled: true,
+  filesystem: {
+    ...baseFs,
+    askRead: ["inside.txt"],
+    askWrite: ["prompt.txt", ".env"],
+  },
+});
 
 let sandboxActive = false;
 
@@ -80,9 +111,19 @@ test("setup: real sessions boot with the OS sandbox", async () => {
   const sessionStart = handlers.get("session_start")!;
   await sessionStart({}, makeCtx(projA));
   await sessionStart({}, makeCtx(projB));
+  await sessionStart({}, makeCtx(projC));
   sandboxActive = !notifications.some((message) =>
     message.includes("Sandbox initialization failed"),
   );
+  if (sandboxActive && process.platform === "linux") {
+    assert.ok(
+      notifications.some(
+        (message) =>
+          message.includes("Linux OS-level denyWrite does not support these glob patterns") &&
+          message.includes('"*.pem"'),
+      ),
+    );
+  }
 });
 
 function skipIfInactive(t: import("node:test").TestContext) {
@@ -101,6 +142,26 @@ test("read outside allowances is blocked (headless prompt aborts)", async (t) =>
   const result = await toolCall(projA, "read", { path: "/etc/hostname" });
   assert.equal(result?.block, true);
   assert.match(result?.reason ?? "", /read access denied/);
+});
+
+test("askRead prompts inside broad allowRead and fails closed without UI", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projC);
+  const result = await toolCall(projC, "read", { path: "inside.txt" });
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /askRead/);
+});
+
+test("approved askRead rule suppresses repeat prompts for the session", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projC);
+  let prompts = 0;
+  const ctx = makeApprovingCtx(projC, () => prompts++);
+  const handler = handlers.get("tool_call")!;
+
+  assert.equal(await handler({ toolName: "read", input: { path: "inside.txt" } }, ctx), undefined);
+  assert.equal(await handler({ toolName: "read", input: { path: "inside.txt" } }, ctx), undefined);
+  assert.equal(prompts, 1);
 });
 
 test("a throwing prompt UI fails closed", async (t) => {
@@ -128,6 +189,40 @@ test("write inside allowWrite is allowed", async (t) => {
   skipIfInactive(t);
   process.chdir(projA);
   assert.equal(await toolCall(projA, "write", { path: "newfile.txt" }), undefined);
+});
+
+test("askWrite prompts inside broad allowWrite and fails closed without UI", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projC);
+  const result = await toolCall(projC, "write", { path: "prompt.txt" });
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /askWrite/);
+});
+
+test("approved askWrite rule suppresses repeat prompts for the session", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projC);
+  let prompts = 0;
+  const ctx = makeApprovingCtx(projC, () => prompts++);
+  const handler = handlers.get("tool_call")!;
+
+  assert.equal(await handler({ toolName: "write", input: { path: "prompt.txt" } }, ctx), undefined);
+  assert.equal(await handler({ toolName: "write", input: { path: "prompt.txt" } }, ctx), undefined);
+  assert.equal(prompts, 1);
+});
+
+test("denyWrite remains a hard block when the path also matches askWrite", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projC);
+  let prompts = 0;
+  const ctx = makeApprovingCtx(projC, () => prompts++);
+  const result = await handlers.get("tool_call")!(
+    { toolName: "write", input: { path: ".env" } },
+    ctx,
+  );
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /denyWrite/);
+  assert.equal(prompts, 0);
 });
 
 test("write to a denyWrite path is a hard block", async (t) => {
