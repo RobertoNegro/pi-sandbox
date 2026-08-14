@@ -4,3 +4,4 @@
  */
 
 export { default } from "./src/extension.ts";
+export type { ToolAccess, ToolPolicies, ToolPolicy } from "./src/tool-policy.ts";

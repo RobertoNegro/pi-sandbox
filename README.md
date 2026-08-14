@@ -3,7 +3,7 @@
 Sandbox for [pi](https://pi.dev/).
 
 Sandboxes pi like this:
-- read/write/edit: direct control using allow/deny lists
+- configured filesystem tools: direct control using allow/deny lists (`read`, `write`, and `edit` by default)
 - bash: uses [`@carderne/sandbox-runtime`](https://www.npmjs.com/package/@carderne/sandbox-runtime) to control network and file system access
 
 When a blocked action is attempted, the user is
@@ -61,10 +61,14 @@ pi install npm:pi-sandbox
 
 #### Configure
 Add a config like this either to Pi's global agent directory (by default, `~/.pi/agent/sandbox.json`; respects `PI_CODING_AGENT_DIR`) or to `.pi/sandbox.json` (local).
-Scalar settings in the local config take precedence over global settings. The
-path and domain arrays from both files are combined and deduplicated, so a
-project can add permissions without repeating the global configuration. Built-in
-defaults are used for an array only when neither file configures it.
+Scalar settings in the local config take precedence over global settings. Path and
+domain arrays from both files are combined and deduplicated, so a project can add
+permissions without repeating the global configuration. `toolPolicies` are also
+combined additively with the built-in policies; conflicting entries use `write` access
+and require the union of all declared path arguments (except for the built-in
+`read`/`write`/`edit` tools, whose configured path arguments replace the default
+`path` argument). Built-in defaults are used for a
+path or domain array only when neither file configures it.
 
 Note below that the order of precedence for filesystem read and write are opposite.
 
@@ -94,9 +98,27 @@ Note below that the order of precedence for filesystem read and write are opposi
     // - DENY takes precedence and is never prompted
     "allowWrite": [".", "/tmp"],
     "denyWrite": [".env", ".env.*", "*.pem", "*.key"]
+  },
+  "toolPolicies": {
+    "replace": { "access": "write", "pathArguments": ["path"] },
+    "undo_last_replace": { "access": "write", "pathArguments": ["path"] },
+    "copy_file": { "access": "write", "pathArguments": ["source", "destination"] }
   }
 }
 ```
+
+`toolPolicies` maps a Pi tool name to filesystem access and one or more top-level
+string arguments containing target paths. Every declared argument is required and
+checked. Missing, empty, non-string, or NUL-containing path arguments block the tool
+call. When multiple config layers define the same tool, `write` wins over `read` and
+all path arguments are required. Built-in policies for `read`, `write`, and `edit`
+cannot be removed by configuration, but configuring one of them replaces its default
+`path` argument with the configured ones instead of adding to them.
+
+Tools with implicit filesystem side effects, nested calls, or paths that are not
+present in their input cannot be secured through `toolPolicies`. The `bash` tool is
+excluded from `toolPolicies`; its filesystem access is enforced by the OS-level
+sandbox.
 
 #### Usage
 
@@ -116,8 +138,9 @@ Alt+S                            toggle sandboxing on/off for the session
 **Bash commands** are wrapped with `sandbox-exec` (macOS) or `bubblewrap`
 (Linux) to enforce network and filesystem restrictions at the OS level.
 
-**Read, write, and edit tool calls** are intercepted before execution and
-checked against the same filesystem policy. The OS-level sandbox cannot cover
+**Configured filesystem tool calls** are intercepted before execution and checked
+against the same filesystem policy. `read`, `write`, and `edit` are always configured;
+additional tools are added through `toolPolicies`. The OS-level sandbox cannot cover
 these tools because they run directly in the Node.js process rather than in a
 subprocess.
 
@@ -140,8 +163,8 @@ extension reloads or pi restarts.
 | Rule | Behaviour |
 |------|-----------|
 | Domain not in `allowedDomains` | Prompted (bash and `!cmd`) |
-| Path not in `allowRead` or `allowWrite` | Prompted (read tool); granting adds to `allowRead` |
-| Path not in `allowWrite` | Prompted (write/edit tools and bash write failures) |
+| Path not in `allowRead` or `allowWrite` | Prompted (tools with `read` access); granting adds to `allowRead` |
+| Path not in `allowWrite` | Prompted (tools with `write` access and bash write failures) |
 | Path in `denyWrite` | Hard-blocked, no prompt |
 | Domain in `deniedDomains` | Hard-blocked at OS level, no prompt |
 

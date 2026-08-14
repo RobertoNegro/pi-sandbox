@@ -367,6 +367,14 @@ export function formatSandboxConfiguration(
   paths: { globalPath: string; projectPath: string },
   allowances: SessionAllowances,
 ): string {
+  const toolPolicies = Object.entries(config.toolPolicies ?? {});
+  const readTools = toolPolicies
+    .filter(([, policy]) => policy.access === "read")
+    .map(([name, policy]) => `${name}(${policy.pathArguments.join(", ")})`);
+  const writeTools = toolPolicies
+    .filter(([, policy]) => policy.access === "write")
+    .map(([name, policy]) => `${name}(${policy.pathArguments.join(", ")})`);
+
   return [
     "Sandbox Configuration",
     `  Project config: ${paths.projectPath}`,
@@ -380,7 +388,7 @@ export function formatSandboxConfiguration(
     `  Denied domains:  ${config.network?.deniedDomains?.join(", ") || "(none)"}`,
     ...(allowances.domains.length ? [`  Session allowed: ${allowances.domains.join(", ")}`] : []),
     "",
-    "Filesystem (bash + read/write/edit tools):",
+    "Filesystem (bash + configured tools):",
     `  Deny Read:   ${config.filesystem?.denyRead?.join(", ") || "(none)"}`,
     `  Allow Read:  ${config.filesystem?.allowRead?.join(", ") || "(none)"}`,
     `  Allow Write: ${config.filesystem?.allowWrite?.join(", ") || "(none)"}`,
@@ -389,6 +397,8 @@ export function formatSandboxConfiguration(
     ...(allowances.writePaths.length
       ? [`  Session write: ${allowances.writePaths.join(", ")}`]
       : []),
+    `  Read tools:  ${readTools.join(", ") || "(none)"}`,
+    `  Write tools: ${writeTools.join(", ") || "(none)"}`,
     "",
     "Note: ALL reads are prompted unless the path is in allowRead or allowWrite.",
     "Note: allowWrite also grants read access to the same path.",

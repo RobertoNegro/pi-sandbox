@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { type SandboxRuntimeConfig } from "@carderne/sandbox-runtime";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import { BUILTIN_TOOL_POLICIES, mergeToolPolicies, type ToolPolicies } from "./tool-policy.ts";
+
 export type SandboxConfig = Omit<SandboxRuntimeConfig, "network"> & {
   enabled?: boolean;
   permissionPromptTimeoutSeconds?: number;
@@ -12,6 +14,7 @@ export type SandboxConfig = Omit<SandboxRuntimeConfig, "network"> & {
     /** Route ordinary `ssh` commands through the sandbox SOCKS proxy. */
     sshProxy?: boolean;
   };
+  toolPolicies?: ToolPolicies;
 };
 
 type NetworkConfig = NonNullable<SandboxConfig["network"]>;
@@ -50,6 +53,7 @@ export const DEFAULT_CONFIG: SandboxConfig = {
     allowWrite: [".", "/tmp"],
     denyWrite: [".env", ".env.*", "*.pem", "*.key"],
   },
+  toolPolicies: BUILTIN_TOOL_POLICIES,
 };
 
 function mergeObjects(base: SandboxConfig, overrides: SandboxConfigFile): SandboxConfig {
@@ -90,6 +94,11 @@ export function mergeConfigLayers(
 
   return {
     ...merged,
+    toolPolicies: mergeToolPolicies(
+      defaults.toolPolicies,
+      globalConfig.toolPolicies,
+      projectConfig.toolPolicies,
+    ),
     network: {
       ...merged.network,
       allowedDomains:

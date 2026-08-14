@@ -30,6 +30,7 @@ import {
   type SessionAllowances,
   supportsNodeEnvProxy,
 } from "./sandbox-runtime.ts";
+import { canonicalizeToolPath, extractToolPaths, getToolPolicy } from "./tool-policy.ts";
 import {
   formatSandboxConfiguration,
   formatSandboxStatus,
@@ -301,43 +302,75 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    if (isToolCallEventType("read", event)) {
-      const path = canonicalizePath(event.input.path);
-      if (!matchesPattern(path, effectiveReadPaths(ctx.cwd))) {
+    // Bash filesystem access is enforced by the OS-level sandbox, not toolPolicies;
+    // a policy for "bash" would misinterpret the command string as a path.
+    if (event.toolName === "bash") return;
+
+    const toolPolicy = getToolPolicy(config.toolPolicies, event.toolName);
+    if (!toolPolicy) return;
+
+    const extractedPaths = extractToolPaths(event.input, toolPolicy);
+    if (!extractedPaths.ok) {
+      return {
+        block: true,
+        reason: `Sandbox: blocked "${event.toolName}": ${extractedPaths.reason}`,
+      };
+    }
+
+    let paths: string[];
+    try {
+      paths = [
+        ...new Set(
+          extractedPaths.paths.map((inputPath) => canonicalizeToolPath(inputPath, ctx.cwd)),
+        ),
+      ];
+    } catch (error) {
+      return {
+        block: true,
+        reason: `Sandbox: could not resolve a path for "${event.toolName}": ${error instanceof Error ? error.message : error}`,
+      };
+    }
+
+    if (toolPolicy.access === "read") {
+      for (const path of paths) {
+        if (matchesPattern(path, effectiveReadPaths(ctx.cwd))) continue;
+
         const choice = await promptReadBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds);
         if (choice.action === "abort") {
           return { block: true, reason: `Sandbox: read access denied for "${path}"` };
         }
         await applyChoice(choice.action, "read", choice.value, ctx.cwd);
-        return;
       }
+      return;
     }
 
-    if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
-      const path = canonicalizePath((event.input as { path: string }).path);
+    // Check every path against denyWrite before prompting, so a tool call that
+    // is doomed to be blocked never asks for an approval it cannot use.
+    const denyWrite = config.filesystem?.denyWrite ?? [];
+    for (const path of paths) {
+      if (!matchesPattern(path, denyWrite)) continue;
+
+      return {
+        block: true,
+        reason:
+          `Sandbox: write access denied for "${path}" (in denyWrite). ` +
+          `To change this, edit denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
+      };
+    }
+
+    for (const path of paths) {
       const writePermission = await resolveWritePermission({
         path,
         allowWrite: effectiveWritePaths(ctx.cwd),
-        denyWrite: config.filesystem?.denyWrite ?? [],
+        denyWrite,
         prompt: (path) => promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),
         saveWritePermission: (choice, value) => applyChoice(choice, "write", value, ctx.cwd),
       });
-      if (writePermission.action === "deny") {
-        return {
-          block: true,
-          reason:
-            `Sandbox: write access denied for "${path}" (in denyWrite). ` +
-            `To change this, edit denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
-        };
-      }
       if (writePermission.action === "abort") {
         return {
           block: true,
           reason: `Sandbox: write access denied for "${path}" (not in allowWrite)`,
         };
-      }
-      if (writePermission.action === "granted") {
-        return;
       }
     }
   });

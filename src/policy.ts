@@ -59,12 +59,12 @@ export function domainIsAllowed(domain: string, allowedDomains: string[]): boole
   return allowedDomains.some((pattern) => domainMatchesPattern(domain, pattern));
 }
 
-function expandPath(filePath: string): string {
-  return resolve(filePath.replace(/^~(?=$|\/)/, homedir()));
+function expandPath(filePath: string, cwd: string = process.cwd()): string {
+  return resolve(cwd, filePath.replace(/^~(?=$|\/)/, homedir()));
 }
 
-export function canonicalizePath(filePath: string): string {
-  const absolutePath = expandPath(filePath);
+export function canonicalizePath(filePath: string, cwd: string = process.cwd()): string {
+  const absolutePath = expandPath(filePath, cwd);
   try {
     return realpathSync.native(absolutePath);
   } catch {
