@@ -208,12 +208,13 @@ export default function (pi: ExtensionAPI) {
         const blockedPath = extractBlockedWritePath(output);
 
         if (blockedPath) {
-          const path = canonicalizePath(blockedPath);
+          const path = canonicalizePath(blockedPath, ctx.cwd);
           const config = loadConfig(ctx.cwd);
           const writePermission = await resolveWritePermission({
             path,
             allowWrite: effectiveWritePaths(ctx.cwd),
             denyWrite: config.filesystem?.denyWrite ?? [],
+            cwd: ctx.cwd,
             prompt: (path) =>
               promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),
             saveWritePermission: (choice, value) => applyChoice(choice, "write", value, ctx.cwd),
@@ -333,7 +334,7 @@ export default function (pi: ExtensionAPI) {
 
     if (toolPolicy.access === "read") {
       for (const path of paths) {
-        if (matchesPattern(path, effectiveReadPaths(ctx.cwd))) continue;
+        if (matchesPattern(path, effectiveReadPaths(ctx.cwd), ctx.cwd)) continue;
 
         const choice = await promptReadBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds);
         if (choice.action === "abort") {
@@ -348,7 +349,7 @@ export default function (pi: ExtensionAPI) {
     // is doomed to be blocked never asks for an approval it cannot use.
     const denyWrite = config.filesystem?.denyWrite ?? [];
     for (const path of paths) {
-      if (!matchesPattern(path, denyWrite)) continue;
+      if (!matchesPattern(path, denyWrite, ctx.cwd)) continue;
 
       return {
         block: true,
@@ -363,6 +364,7 @@ export default function (pi: ExtensionAPI) {
         path,
         allowWrite: effectiveWritePaths(ctx.cwd),
         denyWrite,
+        cwd: ctx.cwd,
         prompt: (path) => promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),
         saveWritePermission: (choice, value) => applyChoice(choice, "write", value, ctx.cwd),
       });
@@ -428,7 +430,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const target = kind === "domain" ? targetArg : canonicalizePath(targetArg);
+      const target = kind === "domain" ? targetArg : canonicalizePath(targetArg, ctx.cwd);
       const config = loadConfig(ctx.cwd);
       const configKey =
         kind === "domain" ? "allowedDomains" : kind === "read" ? "allowRead" : "allowWrite";
@@ -440,7 +442,9 @@ export default function (pi: ExtensionAPI) {
         (value) => {
           if (!value) return "Rule cannot be empty.";
           const matches =
-            kind === "domain" ? domainIsAllowed(target, [value]) : matchesPattern(target, [value]);
+            kind === "domain"
+              ? domainIsAllowed(target, [value])
+              : matchesPattern(target, [value], ctx.cwd);
           return matches ? null : `Rule must match "${target}".`;
         },
         config.permissionPromptTimeoutSeconds,

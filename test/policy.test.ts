@@ -107,6 +107,14 @@ test("path patterns support directory prefixes and globs", () => {
   assert.equal(matchesPattern(join(root, "file.txt"), [join(root, "*.pem")]), false);
 });
 
+test("relative patterns resolve against the provided cwd, not process.cwd()", () => {
+  const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-policy-")));
+
+  assert.equal(matchesPattern(join(root, "file.txt"), ["."], root), true);
+  assert.equal(matchesPattern(join(root, "..", "outside.txt"), ["."], root), false);
+  assert.equal(matchesPattern(join(root, "key.pem"), ["*.pem"], root), true);
+});
+
 test("canonicalizes symlinks and nonexistent descendants", () => {
   const root = mkdtempSync(join(tmpdir(), "pi-sandbox-canonical-"));
   const real = join(root, "real");

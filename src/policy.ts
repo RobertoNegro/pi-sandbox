@@ -2,9 +2,14 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 
-export function decideWritePolicy(path: string, allowWrite: string[], denyWrite: string[]) {
-  if (matchesPattern(path, denyWrite)) return "deny";
-  if (allowWrite.length === 0 || !matchesPattern(path, allowWrite)) return "prompt";
+export function decideWritePolicy(
+  path: string,
+  allowWrite: string[],
+  denyWrite: string[],
+  cwd: string = process.cwd(),
+) {
+  if (matchesPattern(path, denyWrite, cwd)) return "deny";
+  if (allowWrite.length === 0 || !matchesPattern(path, allowWrite, cwd)) return "prompt";
   return "allow";
 }
 
@@ -12,19 +17,21 @@ export async function resolveWritePermission({
   path,
   allowWrite,
   denyWrite,
+  cwd,
   prompt,
   saveWritePermission,
 }: {
   path: string;
   allowWrite: string[];
   denyWrite: string[];
+  cwd?: string;
   prompt: (path: string) => Promise<{
     action: "abort" | "session" | "project" | "global";
     value: string;
   }>;
   saveWritePermission: (choice: "session" | "project" | "global", value: string) => Promise<void>;
 }) {
-  const policy = decideWritePolicy(path, allowWrite, denyWrite);
+  const policy = decideWritePolicy(path, allowWrite, denyWrite, cwd);
   if (policy !== "prompt") return { action: policy };
 
   const choice = await prompt(path);
@@ -84,10 +91,16 @@ export function canonicalizePath(filePath: string, cwd: string = process.cwd()):
   }
 }
 
-export function matchesPattern(filePath: string, patterns: string[]): boolean {
-  const absolutePath = canonicalizePath(filePath);
+export function matchesPattern(
+  filePath: string,
+  patterns: string[],
+  cwd: string = process.cwd(),
+): boolean {
+  const absolutePath = canonicalizePath(filePath, cwd);
   return patterns.some((pattern) => {
-    const absolutePattern = pattern.includes("*") ? expandPath(pattern) : canonicalizePath(pattern);
+    const absolutePattern = pattern.includes("*")
+      ? expandPath(pattern, cwd)
+      : canonicalizePath(pattern, cwd);
     if (pattern.includes("*")) {
       const escaped = absolutePattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
       return new RegExp(`^${escaped}$`).test(absolutePath);
