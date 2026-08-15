@@ -6,7 +6,12 @@ import {
   getConfigPaths,
   type SandboxConfig,
 } from "./config.ts";
-import { allowsAllDomains, domainIsAllowed, matchesPattern } from "./policy.ts";
+import {
+  allowsAllDomains,
+  canPersistPathRuleGlobally,
+  domainIsAllowed,
+  matchesPattern,
+} from "./policy.ts";
 import { type SessionAllowances } from "./sandbox-runtime.ts";
 
 export type PermissionChoice = "abort" | "session" | "project" | "global";
@@ -65,6 +70,12 @@ export function permissionOptions(cwd: string): PromptOption[] {
   ];
 }
 
+interface PermissionPromptOptions {
+  editable?: boolean;
+  allowGlobal?: boolean;
+  globalDisabledReason?: string;
+}
+
 export async function showPermissionPrompt(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -72,15 +83,18 @@ export async function showPermissionPrompt(
   originalValue: string,
   validateValue: (value: string) => string | null,
   timeoutSeconds?: number,
-  options: { editable?: boolean } = {},
+  options: PermissionPromptOptions = {},
 ): Promise<PermissionPromptResult> {
   if (!ctx.hasUI) return { action: "abort", value: originalValue };
 
   pi.events.emit("request-attention", { message: "Sandbox permission required" });
 
   const timeoutMs = permissionPromptTimeoutMs(timeoutSeconds);
-  const promptOptions = permissionOptions(ctx.cwd);
   const editableValue = options.editable ?? true;
+  const allowGlobal = options.allowGlobal ?? true;
+  const promptOptions = permissionOptions(ctx.cwd).filter(
+    (option) => allowGlobal || option.action !== "global",
+  );
   const result = await ctx.ui.custom<PermissionPromptResult>((tui, theme, _kb, done) => {
     const input = new Input();
     let selectedIndex = 0;
@@ -186,6 +200,9 @@ export async function showPermissionPrompt(
               width,
             ),
           );
+        }
+        if (!allowGlobal && options.globalDisabledReason) {
+          lines.push(truncateToWidth(theme.fg("dim", options.globalDisabledReason), width));
         }
         lines.push("");
         for (let i = 0; i < promptOptions.length; i++) {
@@ -324,6 +341,18 @@ export function promptDomainBlock(
     timeoutSeconds,
   );
 }
+function pathPromptOptions(askRule?: string): PermissionPromptOptions {
+  if (askRule === undefined) return { editable: true };
+
+  const allowGlobal = canPersistPathRuleGlobally(askRule);
+  return {
+    editable: false,
+    allowGlobal,
+    ...(allowGlobal
+      ? {}
+      : { globalDisabledReason: "Global approval unavailable for project-relative ask rules." }),
+  };
+}
 
 export function promptReadBlock(
   pi: ExtensionAPI,
@@ -341,7 +370,7 @@ export function promptReadBlock(
     askRule ?? path,
     (value) => validRule(value, matchesPattern(path, [value], ctx.cwd), `path "${path}"`),
     timeoutSeconds,
-    { editable: askRule === undefined },
+    pathPromptOptions(askRule),
   );
 }
 
@@ -361,7 +390,7 @@ export function promptWriteBlock(
     askRule ?? path,
     (value) => validRule(value, matchesPattern(path, [value], ctx.cwd), `path "${path}"`),
     timeoutSeconds,
-    { editable: askRule === undefined },
+    pathPromptOptions(askRule),
   );
 }
 

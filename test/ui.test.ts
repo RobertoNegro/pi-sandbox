@@ -7,6 +7,7 @@ import {
   permissionOptions,
   permissionPromptRemainingSeconds,
   permissionPromptTimeoutMs,
+  promptReadBlock,
   showPermissionPrompt,
 } from "../src/ui.ts";
 
@@ -94,7 +95,7 @@ test(
   },
 );
 
-test("fixed permission prompts keep the approval rule non-editable", async () => {
+test("relative ask prompts keep the rule fixed and omit global approval", async () => {
   type TestComponent = {
     render(width: number): string[];
     handleInput?(data: string): void;
@@ -110,6 +111,7 @@ test("fixed permission prompts keep the approval rule non-editable", async () =>
   let renderedLines: string[] = [];
   const pi = { events: { emit: () => undefined } } as unknown as ExtensionAPI;
   const ctx = {
+    cwd: "/workspace",
     hasUI: true,
     ui: {
       custom: <T>(factory: PromptFactory<T>): Promise<T> =>
@@ -126,23 +128,28 @@ test("fixed permission prompts keep the approval rule non-editable", async () =>
             done,
           );
           component.handleInput?.("\t");
+          component.handleInput?.("a");
           renderedLines = component.render(100);
           component.handleInput?.("s");
         }),
     },
   } as unknown as ExtensionContext;
 
-  const result = await showPermissionPrompt(
+  const result = await promptReadBlock(
     pi,
     ctx,
-    "Explicit ask",
-    "secrets/public.json",
-    () => null,
+    "/workspace/secrets/public.json",
     0,
-    { editable: false },
+    "secrets/public.json",
   );
 
   assert.deepEqual(result, { action: "session", value: "secrets/public.json" });
   assert.ok(renderedLines.some((line) => line.includes("enter select")));
   assert.ok(renderedLines.every((line) => !line.includes("tab edit")));
+  assert.ok(renderedLines.every((line) => !line.includes("Allow for all projects")));
+  assert.ok(
+    renderedLines.some((line) =>
+      line.includes("Global approval unavailable for project-relative ask rules"),
+    ),
+  );
 });

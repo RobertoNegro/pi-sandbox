@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 
 export function decideWritePolicy(
   path: string,
@@ -54,6 +54,10 @@ export function findExplicitAskRule(
 
   const rule = matchingRules[0];
   return rule !== undefined && !approvedRules.includes(rule) ? rule : undefined;
+}
+
+export function canPersistPathRuleGlobally(rule: string): boolean {
+  return isAbsolute(rule) || /^~(?=$|\/)/.test(rule);
 }
 
 export function unsupportedLinuxDenyWritePatterns(patterns: string[]): string[] {

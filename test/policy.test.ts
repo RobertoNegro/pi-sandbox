@@ -11,6 +11,7 @@ import {
   decideWritePolicy,
   domainIsAllowed,
   extractDomainsFromCommand,
+  canPersistPathRuleGlobally,
   findExplicitAskRule,
   matchesPattern,
   resolveWritePermission,
@@ -124,6 +125,13 @@ test("explicit ask chooses the most-specific rule and an exact approval suppress
     findExplicitAskRule("/workspace/secrets/private.json", rules, ["secrets/public.json"], matches),
     "secrets",
   );
+});
+
+test("global persistence accepts only absolute or home-relative path rules", () => {
+  assert.equal(canPersistPathRuleGlobally("/etc/sandbox-managed"), true);
+  assert.equal(canPersistPathRuleGlobally("~/sandbox-managed"), true);
+  assert.equal(canPersistPathRuleGlobally("secrets/public.json"), false);
+  assert.equal(canPersistPathRuleGlobally("~user/sandbox-managed"), false);
 });
 
 test("detects denyWrite patterns unsupported by Linux bubblewrap", () => {

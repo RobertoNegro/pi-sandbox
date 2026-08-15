@@ -132,9 +132,11 @@ sandbox.
 only. The most-specific matching ask rule is shown as a fixed approval unit: it
 cannot be edited in the prompt. A session approval records that rule in memory;
 project/global approvals add the same rule to `allowRead`/`allowWrite`, suppressing
-repeat prompts without letting a broader existing allow bypass the ask. `denyWrite`
-still wins and is never askable. These ask lists do not change bash or `!cmd` OS
-sandbox behavior.
+repeat prompts without letting a broader existing allow bypass the ask. Global
+approval is available only for absolute or home-relative (`~/...`) ask rules;
+project-relative rules can be approved only for the session or current project, so
+they cannot silently apply to every project. `denyWrite` still wins and is never
+askable. These ask lists do not change bash or `!cmd` OS sandbox behavior.
 
 #### Usage
 
