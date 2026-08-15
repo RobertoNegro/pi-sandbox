@@ -354,6 +354,31 @@ function pathPromptOptions(askRule?: string): PermissionPromptOptions {
   };
 }
 
+function promptFilesystemBlock(
+  access: "read" | "write",
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  path: string,
+  timeoutSeconds?: number,
+  askRule?: string,
+): Promise<PermissionPromptResult> {
+  const isRead = access === "read";
+  const label = isRead ? "Read" : "Write";
+  const allowList = isRead ? "allowRead" : "allowWrite";
+  const askList = isRead ? "askRead" : "askWrite";
+  return showPermissionPrompt(
+    pi,
+    ctx,
+    askRule
+      ? `${isRead ? "📖" : "📝"} ${label} approval required: "${path}" matches ${askList} rule "${askRule}"`
+      : `${isRead ? "📖" : "📝"} ${label} blocked: "${path}" is not in ${allowList}`,
+    askRule ?? path,
+    (value) => validRule(value, matchesPattern(path, [value], ctx.cwd), `path "${path}"`),
+    timeoutSeconds,
+    pathPromptOptions(askRule),
+  );
+}
+
 export function promptReadBlock(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -361,17 +386,7 @@ export function promptReadBlock(
   timeoutSeconds?: number,
   askRule?: string,
 ): Promise<PermissionPromptResult> {
-  return showPermissionPrompt(
-    pi,
-    ctx,
-    askRule
-      ? `📖 Read approval required: "${path}" matches askRead rule "${askRule}"`
-      : `📖 Read blocked: "${path}" is not in allowRead`,
-    askRule ?? path,
-    (value) => validRule(value, matchesPattern(path, [value], ctx.cwd), `path "${path}"`),
-    timeoutSeconds,
-    pathPromptOptions(askRule),
-  );
+  return promptFilesystemBlock("read", pi, ctx, path, timeoutSeconds, askRule);
 }
 
 export function promptWriteBlock(
@@ -381,17 +396,7 @@ export function promptWriteBlock(
   timeoutSeconds?: number,
   askRule?: string,
 ): Promise<PermissionPromptResult> {
-  return showPermissionPrompt(
-    pi,
-    ctx,
-    askRule
-      ? `📝 Write approval required: "${path}" matches askWrite rule "${askRule}"`
-      : `📝 Write blocked: "${path}" is not in allowWrite`,
-    askRule ?? path,
-    (value) => validRule(value, matchesPattern(path, [value], ctx.cwd), `path "${path}"`),
-    timeoutSeconds,
-    pathPromptOptions(askRule),
-  );
+  return promptFilesystemBlock("write", pi, ctx, path, timeoutSeconds, askRule);
 }
 
 export function warnIfAllDomainsAllowed(ctx: ExtensionContext, config: SandboxConfig): void {
