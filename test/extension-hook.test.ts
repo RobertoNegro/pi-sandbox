@@ -110,6 +110,17 @@ const projCApprovals = makeProject("c-approvals", {
     askWrite: ["approval-write.txt"],
   },
 });
+// Project D: ask rules apply through built-in edit and custom multi-path policies.
+const projD = makeProject("d", {
+  enabled: true,
+  filesystem: {
+    ...baseFs,
+    askWrite: ["generated.txt", "moved.txt"],
+  },
+  toolPolicies: {
+    mcp_move: { access: "write", pathArguments: ["source", "destination"] },
+  },
+});
 
 let sandboxActive = false;
 
@@ -123,6 +134,7 @@ test("setup: real sessions boot with the OS sandbox", async () => {
   await sessionStart({}, makeCtx(projB));
   await sessionStart({}, makeCtx(projC));
   await sessionStart({}, makeCtx(projCApprovals));
+  await sessionStart({}, makeCtx(projD));
   sandboxActive = !notifications.some((message) =>
     message.includes("Sandbox initialization failed"),
   );
@@ -215,6 +227,25 @@ test("askWrite prompts inside broad allowWrite and fails closed without UI", asy
   skipIfInactive(t);
   process.chdir(projC);
   const result = await toolCall(projC, "write", { path: "prompt.txt" });
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /askWrite/);
+});
+
+test("askWrite applies to the built-in edit tool", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projD);
+  const result = await toolCall(projD, "edit", { path: "generated.txt" });
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /askWrite/);
+});
+
+test("askWrite applies to custom multi-path tool destinations", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projD);
+  const result = await toolCall(projD, "mcp_move", {
+    source: "inside.txt",
+    destination: "moved.txt",
+  });
   assert.equal(result?.block, true);
   assert.match(result?.reason ?? "", /askWrite/);
 });
