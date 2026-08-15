@@ -17,6 +17,7 @@ import {
   addWritePathToConfig,
   getConfigPaths,
   loadConfig,
+  type SandboxConfig,
 } from "./config.ts";
 import {
   canonicalizePath,
@@ -33,10 +34,16 @@ import {
   initializeSandbox,
   reinitializeSandbox,
   resolveAllowances,
+  type EffectiveAllowances,
   type SessionAllowances,
   supportsNodeEnvProxy,
 } from "./sandbox-runtime.ts";
-import { canonicalizeToolPath, extractToolPaths, getToolPolicy } from "./tool-policy.ts";
+import {
+  canonicalizeToolPath,
+  extractToolPaths,
+  getToolPolicy,
+  type ToolAccess,
+} from "./tool-policy.ts";
 import {
   formatSandboxConfiguration,
   formatSandboxStatus,
@@ -96,6 +103,51 @@ export default function (pi: ExtensionAPI) {
       if (choice !== "session") addWritePathToConfig(target, value);
     }
     await refreshSandbox(cwd);
+  }
+  async function authorizeToolPath(
+    access: ToolAccess,
+    path: string,
+    config: SandboxConfig,
+    effective: EffectiveAllowances,
+    ctx: ExtensionContext,
+    refreshEffectiveAllowances: () => void,
+  ): Promise<ToolCallEventResult | undefined> {
+    const isRead = access === "read";
+    const askRule = findExplicitAskRule(
+      path,
+      (isRead ? config.filesystem?.askRead : config.filesystem?.askWrite) ?? [],
+      isRead ? effective.readPaths : effective.writePaths,
+      (target, patterns) => matchesPattern(target, patterns, ctx.cwd),
+    );
+    const prompt = isRead ? promptReadBlock : promptWriteBlock;
+
+    if (askRule) {
+      const choice = await prompt(pi, ctx, path, config.permissionPromptTimeoutSeconds, askRule);
+      if (choice.action === "abort") {
+        return {
+          block: true,
+          reason: `Sandbox: ${access} access denied for "${path}" (in ${isRead ? "askRead" : "askWrite"})`,
+        };
+      }
+      await applyChoice(choice.action, access, choice.value, ctx.cwd);
+      refreshEffectiveAllowances();
+      return;
+    }
+
+    const allowPaths = isRead ? effective.readPaths : effective.writePaths;
+    if (matchesPattern(path, allowPaths, ctx.cwd)) return;
+
+    const choice = await prompt(pi, ctx, path, config.permissionPromptTimeoutSeconds);
+    if (choice.action === "abort") {
+      return {
+        block: true,
+        reason: isRead
+          ? `Sandbox: read access denied for "${path}"`
+          : `Sandbox: write access denied for "${path}" (not in allowWrite)`,
+      };
+    }
+    await applyChoice(choice.action, access, choice.value, ctx.cwd);
+    refreshEffectiveAllowances();
   }
 
   function updateStatus(
@@ -374,39 +426,15 @@ export default function (pi: ExtensionAPI) {
 
     if (toolPolicy.access === "read") {
       for (const path of paths) {
-        const askRule = findExplicitAskRule(
+        const blocked = await authorizeToolPath(
+          "read",
           path,
-          config.filesystem?.askRead ?? [],
-          effective.readPaths,
-          (target, patterns) => matchesPattern(target, patterns, ctx.cwd),
+          config,
+          effective,
+          ctx,
+          refreshEffectiveAllowances,
         );
-        if (askRule) {
-          const choice = await promptReadBlock(
-            pi,
-            ctx,
-            path,
-            config.permissionPromptTimeoutSeconds,
-            askRule,
-          );
-          if (choice.action === "abort") {
-            return {
-              block: true,
-              reason: `Sandbox: read access denied for "${path}" (in askRead)`,
-            };
-          }
-          await applyChoice(choice.action, "read", choice.value, ctx.cwd);
-          refreshEffectiveAllowances();
-          continue;
-        }
-
-        if (matchesPattern(path, effective.readPaths, ctx.cwd)) continue;
-
-        const choice = await promptReadBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds);
-        if (choice.action === "abort") {
-          return { block: true, reason: `Sandbox: read access denied for "${path}"` };
-        }
-        await applyChoice(choice.action, "read", choice.value, ctx.cwd);
-        refreshEffectiveAllowances();
+        if (blocked) return blocked;
       }
       return;
     }
@@ -426,48 +454,15 @@ export default function (pi: ExtensionAPI) {
     }
 
     for (const path of paths) {
-      // An explicit askWrite rule takes precedence over a broader allowWrite
-      // entry, so it is checked before the ordinary allow/deny resolution.
-      const askRule = findExplicitAskRule(
+      const blocked = await authorizeToolPath(
+        "write",
         path,
-        config.filesystem?.askWrite ?? [],
-        effective.writePaths,
-        (target, patterns) => matchesPattern(target, patterns, ctx.cwd),
+        config,
+        effective,
+        ctx,
+        refreshEffectiveAllowances,
       );
-      if (askRule) {
-        const choice = await promptWriteBlock(
-          pi,
-          ctx,
-          path,
-          config.permissionPromptTimeoutSeconds,
-          askRule,
-        );
-        if (choice.action === "abort") {
-          return {
-            block: true,
-            reason: `Sandbox: write access denied for "${path}" (in askWrite)`,
-          };
-        }
-        await applyChoice(choice.action, "write", choice.value, ctx.cwd);
-        refreshEffectiveAllowances();
-        continue;
-      }
-
-      const writePermission = await resolveWritePermission({
-        path,
-        allowWrite: effective.writePaths,
-        denyWrite,
-        cwd: ctx.cwd,
-        prompt: (path) => promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),
-        saveWritePermission: (choice, value) => applyChoice(choice, "write", value, ctx.cwd),
-      });
-      if (writePermission.action === "abort") {
-        return {
-          block: true,
-          reason: `Sandbox: write access denied for "${path}" (not in allowWrite)`,
-        };
-      }
-      if (writePermission.action === "granted") refreshEffectiveAllowances();
+      if (blocked) return blocked;
     }
   }
 
