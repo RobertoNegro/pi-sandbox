@@ -198,6 +198,12 @@ files to check.
 > is treated as recursive access to the concrete directory before the policy is
 > passed to bubblewrap. Use literal paths to protect files on Linux. pi-sandbox
 > shows an initialization warning listing unsupported `denyWrite` patterns.
+>
+> The same concrete-mount limitation applies to `allowRead`/`allowWrite` glob
+> patterns on Linux: configured Pi tools still evaluate the glob, but bash does not
+> get a matching mount. This also applies when approving a glob `askRead` or
+> `askWrite` rule, because the approval is persisted to an allow list. Use literal
+> paths when tool and bash behavior must stay identical.
 
 `allowedDomains` supports `*.example.com` wildcards. It also supports `"*"` to
 allow all domains; pi-sandbox shows a warning when this is configured because it
