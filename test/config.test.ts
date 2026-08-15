@@ -81,10 +81,18 @@ test("mergeConfigLayers combines configured arrays and deduplicates entries", ()
 test("mergeConfigLayers ignores malformed permission arrays", () => {
   const merged = mergeConfigLayers(
     DEFAULT_CONFIG,
-    { filesystem: { denyWrite: "*.key" as unknown as string[] } },
+    {
+      filesystem: {
+        askRead: "secrets/**" as unknown as string[],
+        askWrite: 42 as unknown as string[],
+        denyWrite: "*.key" as unknown as string[],
+      },
+    },
     {},
   );
 
+  assert.deepEqual(merged.filesystem?.askRead, DEFAULT_CONFIG.filesystem?.askRead);
+  assert.deepEqual(merged.filesystem?.askWrite, DEFAULT_CONFIG.filesystem?.askWrite);
   assert.deepEqual(merged.filesystem?.denyWrite, DEFAULT_CONFIG.filesystem?.denyWrite);
 });
 
