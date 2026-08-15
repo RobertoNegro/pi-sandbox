@@ -65,8 +65,6 @@ export default function (pi: ExtensionAPI) {
 
   const effectiveAllowances = (cwd: string) => resolveAllowances(loadConfig(cwd), allowances);
   const effectiveDomains = (cwd: string) => effectiveAllowances(cwd).domains;
-  const effectiveReadPaths = (cwd: string) => effectiveAllowances(cwd).readPaths;
-  const effectiveWritePaths = (cwd: string) => effectiveAllowances(cwd).writePaths;
 
   async function refreshSandbox(cwd: string): Promise<void> {
     if (!sandboxInitialized) return;
@@ -230,7 +228,7 @@ export default function (pi: ExtensionAPI) {
           const config = loadConfig(ctx.cwd);
           const writePermission = await resolveWritePermission({
             path,
-            allowWrite: effectiveWritePaths(ctx.cwd),
+            allowWrite: effectiveAllowances(ctx.cwd).writePaths,
             denyWrite: config.filesystem?.denyWrite ?? [],
             cwd: ctx.cwd,
             prompt: (path) =>
@@ -302,6 +300,10 @@ export default function (pi: ExtensionAPI) {
     if (!sandboxEnabled) return;
     const config = loadConfig(ctx.cwd);
     if (!config.enabled) return;
+    let effective = resolveAllowances(config, allowances);
+    const refreshEffectiveAllowances = () => {
+      effective = resolveAllowances(loadConfig(ctx.cwd), allowances);
+    };
     const { projectPath, globalPath } = getConfigPaths(ctx.cwd);
 
     if (sandboxInitialized && isToolCallEventType("bash", event)) {
@@ -355,11 +357,10 @@ export default function (pi: ExtensionAPI) {
 
     if (toolPolicy.access === "read") {
       for (const path of paths) {
-        const readPaths = effectiveReadPaths(ctx.cwd);
         const askRule = findExplicitAskRule(
           path,
           config.filesystem?.askRead ?? [],
-          readPaths,
+          effective.readPaths,
           (target, patterns) => matchesPattern(target, patterns, ctx.cwd),
         );
         if (askRule) {
@@ -377,16 +378,18 @@ export default function (pi: ExtensionAPI) {
             };
           }
           await applyChoice(choice.action, "read", choice.value, ctx.cwd);
+          refreshEffectiveAllowances();
           continue;
         }
 
-        if (matchesPattern(path, readPaths, ctx.cwd)) continue;
+        if (matchesPattern(path, effective.readPaths, ctx.cwd)) continue;
 
         const choice = await promptReadBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds);
         if (choice.action === "abort") {
           return { block: true, reason: `Sandbox: read access denied for "${path}"` };
         }
         await applyChoice(choice.action, "read", choice.value, ctx.cwd);
+        refreshEffectiveAllowances();
       }
       return;
     }
@@ -406,13 +409,12 @@ export default function (pi: ExtensionAPI) {
     }
 
     for (const path of paths) {
-      const writePaths = effectiveWritePaths(ctx.cwd);
       // An explicit askWrite rule takes precedence over a broader allowWrite
       // entry, so it is checked before the ordinary allow/deny resolution.
       const askRule = findExplicitAskRule(
         path,
         config.filesystem?.askWrite ?? [],
-        writePaths,
+        effective.writePaths,
         (target, patterns) => matchesPattern(target, patterns, ctx.cwd),
       );
       if (askRule) {
@@ -430,12 +432,13 @@ export default function (pi: ExtensionAPI) {
           };
         }
         await applyChoice(choice.action, "write", choice.value, ctx.cwd);
+        refreshEffectiveAllowances();
         continue;
       }
 
       const writePermission = await resolveWritePermission({
         path,
-        allowWrite: writePaths,
+        allowWrite: effective.writePaths,
         denyWrite,
         cwd: ctx.cwd,
         prompt: (path) => promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),
@@ -447,6 +450,7 @@ export default function (pi: ExtensionAPI) {
           reason: `Sandbox: write access denied for "${path}" (not in allowWrite)`,
         };
       }
+      if (writePermission.action === "granted") refreshEffectiveAllowances();
     }
   }
 
