@@ -100,6 +100,16 @@ const projC = makeProject("c", {
     askWrite: ["prompt.txt", ".env"],
   },
 });
+// Approval tests use a separate project and unique rules so session allowances
+// cannot leak into the prompt-precedence tests above.
+const projCApprovals = makeProject("c-approvals", {
+  enabled: true,
+  filesystem: {
+    ...baseFs,
+    askRead: ["approval-read.txt"],
+    askWrite: ["approval-write.txt"],
+  },
+});
 
 let sandboxActive = false;
 
@@ -112,6 +122,7 @@ test("setup: real sessions boot with the OS sandbox", async () => {
   await sessionStart({}, makeCtx(projA));
   await sessionStart({}, makeCtx(projB));
   await sessionStart({}, makeCtx(projC));
+  await sessionStart({}, makeCtx(projCApprovals));
   sandboxActive = !notifications.some((message) =>
     message.includes("Sandbox initialization failed"),
   );
@@ -154,13 +165,19 @@ test("askRead prompts inside broad allowRead and fails closed without UI", async
 
 test("approved askRead rule suppresses repeat prompts for the session", async (t) => {
   skipIfInactive(t);
-  process.chdir(projC);
+  process.chdir(projCApprovals);
   let prompts = 0;
-  const ctx = makeApprovingCtx(projC, () => prompts++);
+  const ctx = makeApprovingCtx(projCApprovals, () => prompts++);
   const handler = handlers.get("tool_call")!;
 
-  assert.equal(await handler({ toolName: "read", input: { path: "inside.txt" } }, ctx), undefined);
-  assert.equal(await handler({ toolName: "read", input: { path: "inside.txt" } }, ctx), undefined);
+  assert.equal(
+    await handler({ toolName: "read", input: { path: "approval-read.txt" } }, ctx),
+    undefined,
+  );
+  assert.equal(
+    await handler({ toolName: "read", input: { path: "approval-read.txt" } }, ctx),
+    undefined,
+  );
   assert.equal(prompts, 1);
 });
 
@@ -201,13 +218,19 @@ test("askWrite prompts inside broad allowWrite and fails closed without UI", asy
 
 test("approved askWrite rule suppresses repeat prompts for the session", async (t) => {
   skipIfInactive(t);
-  process.chdir(projC);
+  process.chdir(projCApprovals);
   let prompts = 0;
-  const ctx = makeApprovingCtx(projC, () => prompts++);
+  const ctx = makeApprovingCtx(projCApprovals, () => prompts++);
   const handler = handlers.get("tool_call")!;
 
-  assert.equal(await handler({ toolName: "write", input: { path: "prompt.txt" } }, ctx), undefined);
-  assert.equal(await handler({ toolName: "write", input: { path: "prompt.txt" } }, ctx), undefined);
+  assert.equal(
+    await handler({ toolName: "write", input: { path: "approval-write.txt" } }, ctx),
+    undefined,
+  );
+  assert.equal(
+    await handler({ toolName: "write", input: { path: "approval-write.txt" } }, ctx),
+    undefined,
+  );
   assert.equal(prompts, 1);
 });
 
