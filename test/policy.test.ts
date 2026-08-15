@@ -174,3 +174,13 @@ test("canonicalizes symlinks and nonexistent descendants", () => {
     join(canonicalizePath(real), "new", "file"),
   );
 });
+
+test("glob patterns canonicalize symlinked working directories", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-sandbox-glob-link-"));
+  const real = join(root, "real");
+  const link = join(root, "link");
+  mkdirSync(real);
+  symlinkSync(real, link);
+
+  assert.equal(matchesPattern(join(link, "secret.pem"), ["*.pem"], link), true);
+});

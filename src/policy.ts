@@ -127,9 +127,7 @@ export function matchesPattern(
   const fold = (value: string) => (process.platform === "darwin" ? value.toLowerCase() : value);
   const absolutePath = fold(canonicalizePath(filePath, cwd));
   return patterns.some((pattern) => {
-    const absolutePattern = fold(
-      pattern.includes("*") ? expandPath(pattern, cwd) : canonicalizePath(pattern, cwd),
-    );
+    const absolutePattern = fold(canonicalizePath(pattern, cwd));
     if (pattern.includes("*")) {
       const escaped = absolutePattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
       return new RegExp(`^${escaped}$`).test(absolutePath);
