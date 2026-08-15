@@ -160,7 +160,9 @@ Alt+S                            toggle sandboxing on/off for the session
 against the same filesystem policy. `read`, `write`, and `edit` are always configured;
 additional tools are added through `toolPolicies`. The OS-level sandbox cannot cover
 these tools because they run directly in the Node.js process rather than in a
-subprocess.
+subprocess. If the OS-level sandbox cannot initialize, configured filesystem tool
+calls fail closed instead of running without policy enforcement. Explicit session
+disables (`--no-sandbox`, config, or `/sandbox-disable`) still turn this guard off.
 
 When a block is triggered, a prompt appears with four options. Permission prompts
 automatically select **Abort (keep blocked)** after 10 minutes by default. Set

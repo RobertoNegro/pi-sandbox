@@ -61,6 +61,7 @@ export default function (pi: ExtensionAPI) {
 
   let sandboxEnabled = false;
   let sandboxInitialized = false;
+  let toolPolicyState: "pending" | "active" | "disabled" | "unavailable" = "pending";
   const allowances: SessionAllowances = { domains: [], readPaths: [], writePaths: [] };
 
   const effectiveAllowances = (cwd: string) => resolveAllowances(loadConfig(cwd), allowances);
@@ -109,9 +110,11 @@ export default function (pi: ExtensionAPI) {
     setProxyEnvironment: boolean,
   ): Promise<boolean> {
     if (sandboxEnabled) {
+      toolPolicyState = "active";
       ctx.ui.notify("Sandbox is already enabled", "info");
       return false;
     }
+    toolPolicyState = "unavailable";
 
     const config = loadConfig(ctx.cwd);
     const platform = process.platform;
@@ -127,6 +130,7 @@ export default function (pi: ExtensionAPI) {
       }
       sandboxEnabled = true;
       sandboxInitialized = true;
+      toolPolicyState = "active";
       if (platform === "linux") {
         const unsupportedPatterns = unsupportedLinuxDenyWritePatterns(
           config.filesystem?.denyWrite ?? [],
@@ -144,6 +148,7 @@ export default function (pi: ExtensionAPI) {
       return true;
     } catch (error) {
       sandboxEnabled = false;
+      toolPolicyState = "unavailable";
       ctx.ui.notify(
         `Sandbox initialization failed: ${error instanceof Error ? error.message : error}`,
         "error",
@@ -155,6 +160,7 @@ export default function (pi: ExtensionAPI) {
   async function disableSandbox(
     ctx: Parameters<typeof warnIfAllDomainsAllowed>[0],
   ): Promise<boolean> {
+    toolPolicyState = "disabled";
     if (!sandboxEnabled) {
       ctx.ui.notify("Sandbox is already disabled", "info");
       return false;
@@ -297,9 +303,22 @@ export default function (pi: ExtensionAPI) {
     event: ToolCallEvent,
     ctx: ExtensionContext,
   ): Promise<ToolCallEventResult | undefined> {
-    if (!sandboxEnabled) return;
     const config = loadConfig(ctx.cwd);
-    if (!config.enabled) return;
+    if (!config.enabled || toolPolicyState === "disabled") return;
+
+    const isBash = event.toolName === "bash";
+    const toolPolicy = isBash ? undefined : getToolPolicy(config.toolPolicies, event.toolName);
+    if (toolPolicyState !== "active") {
+      if (toolPolicy) {
+        return {
+          block: true,
+          reason: `Sandbox: blocked "${event.toolName}": filesystem tool enforcement is unavailable because the OS sandbox is not active`,
+        };
+      }
+      return;
+    }
+    if (!sandboxEnabled) return;
+
     let effective = resolveAllowances(config, allowances);
     const refreshEffectiveAllowances = () => {
       effective = resolveAllowances(loadConfig(ctx.cwd), allowances);
@@ -328,11 +347,9 @@ export default function (pi: ExtensionAPI) {
 
     // Bash filesystem access is enforced by the OS-level sandbox, not toolPolicies;
     // a policy for "bash" would misinterpret the command string as a path.
-    if (event.toolName === "bash") return;
+    if (isBash) return;
 
-    const toolPolicy = getToolPolicy(config.toolPolicies, event.toolName);
     if (!toolPolicy) return;
-
     const extractedPaths = extractToolPaths(event.input, toolPolicy);
     if (!extractedPaths.ok) {
       return {
@@ -472,11 +489,13 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (pi.getFlag("no-sandbox") as boolean) {
       sandboxEnabled = false;
+      toolPolicyState = "disabled";
       ctx.ui.notify("Sandbox disabled via --no-sandbox", "warning");
       return;
     }
     if (!loadConfig(ctx.cwd).enabled) {
       sandboxEnabled = false;
+      toolPolicyState = "disabled";
       ctx.ui.notify("Sandbox disabled via config", "info");
       return;
     }

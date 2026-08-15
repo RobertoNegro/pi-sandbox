@@ -15,20 +15,24 @@ import extension from "../src/extension.ts";
 
 type Handler = (event: any, ctx: any) => Promise<any>;
 
-const handlers = new Map<string, Handler>();
-const notifications: string[] = [];
-const pi = {
-  registerFlag: () => {},
-  getFlag: () => false,
-  registerTool: () => {},
-  registerShortcut: () => {},
-  registerCommand: () => {},
-  on: (name: string, handler: Handler) => handlers.set(name, handler),
-  events: { emit: () => {} },
-};
+function makeExtension(getFlag: () => boolean = () => false) {
+  const handlers = new Map<string, Handler>();
+  const notifications: string[] = [];
+  const pi = {
+    registerFlag: () => {},
+    getFlag,
+    registerTool: () => {},
+    registerShortcut: () => {},
+    registerCommand: () => {},
+    on: (name: string, handler: Handler) => handlers.set(name, handler),
+    events: { emit: () => {} },
+  };
 
-extension(pi as any);
+  extension(pi as any);
+  return { handlers, notifications };
+}
 
+const { handlers, notifications } = makeExtension();
 function makeCtx(cwd: string) {
   return {
     cwd,
@@ -127,6 +131,27 @@ let sandboxActive = false;
 function toolCall(cwd: string, toolName: string, input: Record<string, unknown>) {
   return handlers.get("tool_call")!({ toolName, input }, makeCtx(cwd));
 }
+test("configured tools fail closed before sandbox activation", async () => {
+  const isolated = makeExtension();
+  const result = await isolated.handlers.get("tool_call")!(
+    { toolName: "read", input: { path: "inside.txt" } },
+    makeCtx(projA),
+  );
+
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /filesystem tool enforcement is unavailable/);
+});
+
+test("--no-sandbox intentionally disables tool policy enforcement", async () => {
+  const isolated = makeExtension(() => true);
+  await isolated.handlers.get("session_start")!({}, makeCtx(projA));
+  const result = await isolated.handlers.get("tool_call")!(
+    { toolName: "read", input: { path: "inside.txt" } },
+    makeCtx(projA),
+  );
+
+  assert.equal(result, undefined);
+});
 
 test("setup: real sessions boot with the OS sandbox", async () => {
   const sessionStart = handlers.get("session_start")!;
