@@ -79,7 +79,7 @@ Note below that the order of precedence for filesystem read and write are opposi
 ```json
 {
   "enabled": true,
-  "permissionPromptTimeoutSeconds": 600, // Defaults to 10 minutes; 0 waits indefinitely
+  "permissionPromptTimeoutSeconds": 600, // Defaults to 10 minutes; 0 waits indefinitely; invalid values warn and use the default
   "allowBrowserProcess": true,     // If you want to use agent-browser or similar Chrome setup
   "network": {
     "allowLocalBinding": true,     // ditto

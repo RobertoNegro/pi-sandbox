@@ -185,6 +185,11 @@ export function mergeConfigLayers(
     },
   };
 }
+const warnedInvalidPermissionTimeouts = new Set<string>();
+
+function isValidPermissionPromptTimeout(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
 
 function readJsonConfig(configPath: string, warn: boolean): SandboxConfigFile {
   if (!existsSync(configPath)) return {};
@@ -193,7 +198,19 @@ function readJsonConfig(configPath: string, warn: boolean): SandboxConfigFile {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error("configuration must be a JSON object");
     }
-    return parsed as SandboxConfigFile;
+    const config = parsed as SandboxConfigFile;
+    const timeout = config.permissionPromptTimeoutSeconds;
+    if (timeout !== undefined && !isValidPermissionPromptTimeout(timeout)) {
+      const warningKey = `${configPath}:${String(timeout)}`;
+      if (!warnedInvalidPermissionTimeouts.has(warningKey)) {
+        warnedInvalidPermissionTimeouts.add(warningKey);
+        console.error(
+          `Warning: Invalid permissionPromptTimeoutSeconds in ${configPath}: expected a finite number >= 0; using the default`,
+        );
+      }
+      delete config.permissionPromptTimeoutSeconds;
+    }
+    return config;
   } catch (error) {
     if (warn) console.error(`Warning: Could not parse ${configPath}: ${error}`);
     return {};

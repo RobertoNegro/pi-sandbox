@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -21,6 +21,38 @@ test("omitted permission prompt timeout defaults to ten minutes", () => {
 
   assert.equal(DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS, 600);
   assert.equal(merged.permissionPromptTimeoutSeconds, DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS);
+});
+test("invalid permission prompt timeout warns once and falls back to the default", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-sandbox-invalid-timeout-"));
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-sandbox-agent-"));
+  mkdirSync(join(root, ".pi"), { recursive: true });
+  writeFileSync(
+    join(root, ".pi", "sandbox.json"),
+    JSON.stringify({ permissionPromptTimeoutSeconds: -1 }),
+  );
+
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousError = console.error;
+  const warnings: string[] = [];
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  console.error = (message: unknown) => warnings.push(String(message));
+
+  try {
+    assert.equal(
+      loadConfig(root).permissionPromptTimeoutSeconds,
+      DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS,
+    );
+    assert.equal(
+      loadConfig(root).permissionPromptTimeoutSeconds,
+      DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS,
+    );
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /Invalid permissionPromptTimeoutSeconds/);
+  } finally {
+    console.error = previousError;
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  }
 });
 
 test("mergeConfigLayers combines configured arrays and deduplicates entries", () => {
