@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -45,7 +45,7 @@ function makeCtx(cwd: string) {
   };
 }
 
-function makeApprovingCtx(cwd: string, onPrompt: () => void) {
+function makeApprovingCtx(cwd: string, onPrompt: () => void, inputs: string[] = ["s"]) {
   const ctx = makeCtx(cwd);
   return {
     ...ctx,
@@ -61,7 +61,7 @@ function makeApprovingCtx(cwd: string, onPrompt: () => void) {
             resolve,
           );
           onPrompt();
-          component.handleInput?.("s");
+          for (const input of inputs) component.handleInput?.(input);
         }),
     },
   };
@@ -110,7 +110,7 @@ const projCApprovals = makeProject("c-approvals", {
   enabled: true,
   filesystem: {
     ...baseFs,
-    askRead: ["approval-read.txt"],
+    askRead: ["approval-read.txt", "project-read.txt"],
     askWrite: ["approval-write.txt"],
   },
 });
@@ -125,6 +125,22 @@ const projD = makeProject("d", {
     mcp_move: { access: "write", pathArguments: ["source", "destination"] },
   },
 });
+const projGlobalApprovals = makeProject("global-approval", {
+  enabled: true,
+  filesystem: baseFs,
+});
+const globalApprovedPath = join(projGlobalApprovals, "global-approval.txt");
+writeFileSync(
+  join(projGlobalApprovals, ".pi", "sandbox.json"),
+  JSON.stringify(
+    {
+      enabled: true,
+      filesystem: { ...baseFs, askRead: [globalApprovedPath] },
+    },
+    null,
+    2,
+  ),
+);
 
 let sandboxActive = false;
 
@@ -160,6 +176,7 @@ test("setup: real sessions boot with the OS sandbox", async () => {
   await sessionStart({}, makeCtx(projC));
   await sessionStart({}, makeCtx(projCApprovals));
   await sessionStart({}, makeCtx(projD));
+  await sessionStart({}, makeCtx(projGlobalApprovals));
   sandboxActive = !notifications.some((message) =>
     message.includes("Sandbox initialization failed"),
   );
@@ -219,6 +236,56 @@ test("approved askRead rule suppresses repeat prompts for the session", async (t
     undefined,
   );
   assert.equal(prompts, 1);
+});
+test("project ask approval persists the fixed rule", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projCApprovals);
+  let prompts = 0;
+  const ctx = makeApprovingCtx(projCApprovals, () => prompts++, ["P"]);
+  const handler = handlers.get("tool_call")!;
+
+  assert.equal(
+    await handler({ toolName: "read", input: { path: "project-read.txt" } }, ctx),
+    undefined,
+  );
+  assert.equal(
+    await handler({ toolName: "read", input: { path: "project-read.txt" } }, ctx),
+    undefined,
+  );
+  assert.equal(prompts, 1);
+
+  const persisted = JSON.parse(readFileSync(join(projCApprovals, ".pi", "sandbox.json"), "utf8"));
+  assert.ok(persisted.filesystem.allowRead.includes("project-read.txt"));
+});
+
+test("global ask approval persists absolute rules to the global config", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projGlobalApprovals);
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-sandbox-global-approval-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+
+  try {
+    let prompts = 0;
+    const ctx = makeApprovingCtx(projGlobalApprovals, () => prompts++, ["A"]);
+    const handler = handlers.get("tool_call")!;
+
+    assert.equal(
+      await handler({ toolName: "read", input: { path: globalApprovedPath } }, ctx),
+      undefined,
+    );
+    assert.equal(
+      await handler({ toolName: "read", input: { path: globalApprovedPath } }, ctx),
+      undefined,
+    );
+    assert.equal(prompts, 1);
+
+    const persisted = JSON.parse(readFileSync(join(agentDir, "sandbox.json"), "utf8"));
+    assert.ok(persisted.filesystem.allowRead.includes(globalApprovedPath));
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  }
 });
 
 test("a throwing prompt UI fails closed", async (t) => {
