@@ -126,6 +126,9 @@ test("setup: real sessions boot with the OS sandbox", async () => {
   sandboxActive = !notifications.some((message) =>
     message.includes("Sandbox initialization failed"),
   );
+  if (!sandboxActive && process.env.CI_REQUIRE_SANDBOX === "1") {
+    assert.fail(`OS-level sandbox required but unavailable: ${notifications.join("; ")}`);
+  }
   if (sandboxActive && process.platform === "linux") {
     assert.ok(
       notifications.some(
