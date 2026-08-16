@@ -19,7 +19,7 @@ import {
   domainIsAllowed,
   extractDomainsFromCommand,
   matchesPattern,
-  shouldPromptForWrite,
+  resolveWritePermission,
 } from "./policy.ts";
 import {
   createSandboxedBashOps,
@@ -207,29 +207,29 @@ export default function (pi: ExtensionAPI) {
         const blockedPath = extractBlockedWritePath(output);
 
         if (blockedPath) {
-          const choice = await promptWriteBlock(
-            pi,
-            ctx,
-            blockedPath,
-            loadConfig(ctx.cwd).permissionPromptTimeoutSeconds,
-          );
-          if (choice.action !== "abort") {
-            await applyChoice(choice.action, "write", choice.value, ctx.cwd);
-            const config = loadConfig(ctx.cwd);
-            const { projectPath, globalPath } = getConfigPaths(ctx.cwd);
-            if (matchesPattern(blockedPath, config.filesystem?.denyWrite ?? [])) {
-              ctx.ui.notify(
-                `⚠️ "${choice.value}" was added to allowWrite, but "${blockedPath}" is also in denyWrite and will remain blocked.\n` +
-                  `Check denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
-                "warning",
-              );
-              return result;
-            }
+          const path = canonicalizePath(blockedPath);
+          const config = loadConfig(ctx.cwd);
+          const writePermission = await resolveWritePermission({
+            path,
+            allowWrite: effectiveWritePaths(ctx.cwd),
+            denyWrite: config.filesystem?.denyWrite ?? [],
+            prompt: (path) =>
+              promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),
+            saveWritePermission: (choice, value) => applyChoice(choice, "write", value, ctx.cwd),
+          });
+          if (writePermission.action === "deny") {
+            return result;
+          }
+          if (writePermission.action === "allow") {
+            await refreshSandbox(ctx.cwd);
+            return runBash();
+          }
+          if (writePermission.action === "granted") {
             onUpdate?.({
               content: [
                 {
                   type: "text",
-                  text: `\n--- Write access granted for "${choice.value}", retrying ---\n`,
+                  text: `\n--- Write access granted for "${writePermission.value}", retrying ---\n`,
                 },
               ],
               details: {},
@@ -315,8 +315,14 @@ export default function (pi: ExtensionAPI) {
 
     if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
       const path = canonicalizePath((event.input as { path: string }).path);
-      const denyWrite = config.filesystem?.denyWrite ?? [];
-      if (matchesPattern(path, denyWrite)) {
+      const writePermission = await resolveWritePermission({
+        path,
+        allowWrite: effectiveWritePaths(ctx.cwd),
+        denyWrite: config.filesystem?.denyWrite ?? [],
+        prompt: (path) => promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds),
+        saveWritePermission: (choice, value) => applyChoice(choice, "write", value, ctx.cwd),
+      });
+      if (writePermission.action === "deny") {
         return {
           block: true,
           reason:
@@ -324,15 +330,13 @@ export default function (pi: ExtensionAPI) {
             `To change this, edit denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
         };
       }
-      if (shouldPromptForWrite(path, effectiveWritePaths(ctx.cwd), matchesPattern)) {
-        const choice = await promptWriteBlock(pi, ctx, path, config.permissionPromptTimeoutSeconds);
-        if (choice.action === "abort") {
-          return {
-            block: true,
-            reason: `Sandbox: write access denied for "${path}" (not in allowWrite)`,
-          };
-        }
-        await applyChoice(choice.action, "write", choice.value, ctx.cwd);
+      if (writePermission.action === "abort") {
+        return {
+          block: true,
+          reason: `Sandbox: write access denied for "${path}" (not in allowWrite)`,
+        };
+      }
+      if (writePermission.action === "granted") {
         return;
       }
     }
