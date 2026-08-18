@@ -149,10 +149,7 @@ export default function (pi: ExtensionAPI) {
     refreshEffectiveAllowances();
   }
 
-  function updateStatus(
-    ctx: ExtensionContext,
-    config: ReturnType<typeof loadConfig>,
-  ) {
+  function updateStatus(ctx: ExtensionContext, config: ReturnType<typeof loadConfig>) {
     ctx.ui.setStatus("sandbox", ctx.ui.theme.fg("accent", formatSandboxStatus(config)));
   }
 
@@ -207,9 +204,7 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function disableSandbox(
-    ctx: ExtensionContext,
-  ): Promise<boolean> {
+  async function disableSandbox(ctx: ExtensionContext): Promise<boolean> {
     toolPolicyState = "disabled";
     if (!sandboxEnabled) {
       ctx.ui.notify("Sandbox is already disabled", "info");
@@ -400,7 +395,7 @@ export default function (pi: ExtensionAPI) {
     if (isBash) return;
 
     if (!toolPolicy) return;
-    const extractedPaths = extractToolPaths(event.input, toolPolicy);
+    const extractedPaths = extractToolPaths(event.input, toolPolicy, ctx.cwd);
     if (!extractedPaths.ok) {
       return {
         block: true,

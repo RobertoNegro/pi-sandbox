@@ -85,7 +85,8 @@ const baseFs = {
 // Project A: built-in policies only (read/write/edit on "path").
 const projA = makeProject("a", { enabled: true, filesystem: baseFs });
 // Project B: read overridden to a "file" argument, bash given a policy that must
-// be ignored, and a custom multi-path tool.
+// be ignored, a custom multi-path tool, and an external search tool whose path is
+// an optional glob.
 const projB = makeProject("b", {
   enabled: true,
   filesystem: baseFs,
@@ -93,6 +94,10 @@ const projB = makeProject("b", {
     read: { access: "read", pathArguments: ["file"] },
     bash: { access: "write", pathArguments: ["command"] },
     mcp_move: { access: "write", pathArguments: ["source", "destination"] },
+    mcp_search: {
+      access: "read",
+      pathArguments: [{ name: "path", required: false, glob: true }],
+    },
   },
 });
 // Project C: explicit asks must override broad ordinary allows for configured tools.
@@ -407,6 +412,31 @@ test("empty path argument fails closed", async (t) => {
   process.chdir(projA);
   const result = await toolCall(projA, "write", { path: "" });
   assert.equal(result?.block, true);
+});
+
+test("an omitted optional path argument is authorized as the session cwd", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projB);
+  assert.equal(await toolCall(projB, "mcp_search", { pattern: "hello" }), undefined);
+  assert.equal(await toolCall(projB, "mcp_search", { pattern: "hello", path: "  " }), undefined);
+});
+
+test("an optional path outside allowances is still blocked", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projB);
+  const result = await toolCall(projB, "mcp_search", { pattern: "hello", path: "/home" });
+  assert.equal(result?.block, true);
+});
+
+test("glob path arguments are checked at their literal prefix", async (t) => {
+  skipIfInactive(t);
+  process.chdir(projB);
+  assert.equal(
+    await toolCall(projB, "mcp_search", { pattern: "x", path: "src/**/*.ts" }),
+    undefined,
+  );
+  const escaping = await toolCall(projB, "mcp_search", { pattern: "x", path: "{src,/home}/**" });
+  assert.equal(escaping?.block, true);
 });
 
 test("tools without a configured policy are untouched", async (t) => {

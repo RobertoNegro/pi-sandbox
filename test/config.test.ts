@@ -208,16 +208,23 @@ test("configured tool policies are additive to built-in policies", () => {
     {
       toolPolicies: {
         undo_last_replace: { access: "write", pathArguments: ["path"] },
+        mcp_search: {
+          access: "read",
+          pathArguments: [{ name: "path", required: false, glob: true }],
+        },
       },
     },
   );
 
+  const required = [{ name: "path", required: true, glob: false }];
+  const optionalGlob = [{ name: "path", required: false, glob: true }];
   assert.deepEqual(merged.toolPolicies, {
-    read: { access: "read", pathArguments: ["path"] },
-    write: { access: "write", pathArguments: ["path"] },
-    edit: { access: "write", pathArguments: ["path"] },
-    replace: { access: "write", pathArguments: ["path"] },
-    undo_last_replace: { access: "write", pathArguments: ["path"] },
+    read: { access: "read", pathArguments: required },
+    write: { access: "write", pathArguments: required },
+    edit: { access: "write", pathArguments: required },
+    replace: { access: "write", pathArguments: required },
+    undo_last_replace: { access: "write", pathArguments: required },
+    mcp_search: { access: "read", pathArguments: optionalGlob },
   });
 });
 

@@ -13,6 +13,7 @@ import {
   matchesPattern,
 } from "./policy.ts";
 import { type SessionAllowances } from "./sandbox-runtime.ts";
+import { formatToolPathArgument, type ToolPolicy } from "./tool-policy.ts";
 
 export type PermissionChoice = "abort" | "session" | "project" | "global";
 
@@ -412,12 +413,10 @@ export function formatSandboxConfiguration(
   allowances: SessionAllowances,
 ): string {
   const toolPolicies = Object.entries(config.toolPolicies ?? {});
-  const readTools = toolPolicies
-    .filter(([, policy]) => policy.access === "read")
-    .map(([name, policy]) => `${name}(${policy.pathArguments.join(", ")})`);
-  const writeTools = toolPolicies
-    .filter(([, policy]) => policy.access === "write")
-    .map(([name, policy]) => `${name}(${policy.pathArguments.join(", ")})`);
+  const formatTool = ([name, policy]: [string, ToolPolicy]) =>
+    `${name}(${policy.pathArguments.map(formatToolPathArgument).join(", ")})`;
+  const readTools = toolPolicies.filter(([, policy]) => policy.access === "read").map(formatTool);
+  const writeTools = toolPolicies.filter(([, policy]) => policy.access === "write").map(formatTool);
 
   return [
     "Sandbox Configuration",

@@ -110,18 +110,36 @@ Note below that the order of precedence for filesystem read and write are opposi
   "toolPolicies": {
     "replace": { "access": "write", "pathArguments": ["path"] },
     "undo_last_replace": { "access": "write", "pathArguments": ["path"] },
-    "copy_file": { "access": "write", "pathArguments": ["source", "destination"] }
+    "copy_file": { "access": "write", "pathArguments": ["source", "destination"] },
+    "grep": {
+      "access": "read",
+      "pathArguments": [{ "name": "path", "required": false, "glob": true }]
+    }
   }
 }
 ```
 
 `toolPolicies` maps a Pi tool name to filesystem access and one or more top-level
-string arguments containing target paths. Every declared argument is required and
-checked. Missing, empty, non-string, or NUL-containing path arguments block the tool
-call. When multiple config layers define the same tool, `write` wins over `read` and
-all path arguments are required. Built-in policies for `read`, `write`, and `edit`
-cannot be removed by configuration, but configuring one of them replaces its default
-`path` argument with the configured ones instead of adding to them.
+arguments containing target paths. A path argument is either a string (required,
+literal path) or an object `{ "name", "required", "glob" }`. Non-string or
+NUL-containing values always block the tool call, as does a missing or empty value
+for a required argument.
+
+`"required": false` fits search tools whose path argument is optional: an
+omitted value means the tool works from the session cwd, so the cwd is what gets
+authorized — the call is never left unchecked. `"glob": true` marks an argument that
+holds a glob or comma-separated glob list (`src/**/*.ts`, `test/,lib/*.js`,
+`{src,lib}/**`); each alternative is reduced to its literal path prefix before the
+policy check, because a glob cannot reach outside that prefix. Leave `glob` off for
+literal paths, otherwise a filename containing `,` or `[` would be checked as a
+pattern.
+
+When multiple config layers define the same tool, the strictest setting wins:
+`write` over `read`, `required` over optional, and literal over `glob`. Built-in
+policies for `read`, `write`, and `edit` cannot be removed by configuration, but
+configuring one of them replaces its default arguments instead of adding to them.
+Tools provided by other extensions are never built in: they are enforced only once
+a config layer declares a policy for them.
 
 Tools with implicit filesystem side effects, nested calls, or paths that are not
 present in their input cannot be secured through `toolPolicies`. The `bash` tool is
@@ -157,12 +175,13 @@ Alt+S                            toggle sandboxing on/off for the session
 (Linux) to enforce network and filesystem restrictions at the OS level.
 
 **Configured filesystem tool calls** are intercepted before execution and checked
-against the same filesystem policy. `read`, `write`, and `edit` are always configured;
-additional tools are added through `toolPolicies`. The OS-level sandbox cannot cover
-these tools because they run directly in the Node.js process rather than in a
-subprocess. If the OS-level sandbox cannot initialize, configured filesystem tool
-calls fail closed instead of running without policy enforcement. Explicit session
-disables (`--no-sandbox`, config, or `/sandbox-disable`) still turn this guard off.
+against the same filesystem policy. `read`, `write`, and `edit` are always
+configured; additional tools are added through `toolPolicies`. The
+OS-level sandbox cannot cover these tools because they run directly in the Node.js
+process rather than in a subprocess. If the OS-level sandbox cannot initialize,
+configured filesystem tool calls fail closed instead of running without policy
+enforcement. Explicit session disables (`--no-sandbox`, config, or
+`/sandbox-disable`) still turn this guard off.
 
 When a block is triggered, a prompt appears with four options. Permission prompts
 automatically select **Abort (keep blocked)** after 10 minutes by default. Set

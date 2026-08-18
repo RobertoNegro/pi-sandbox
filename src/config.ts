@@ -4,7 +4,12 @@ import { dirname, join } from "node:path";
 import { type SandboxRuntimeConfig } from "@carderne/sandbox-runtime";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
-import { BUILTIN_TOOL_POLICIES, mergeToolPolicies, type ToolPolicies } from "./tool-policy.ts";
+import {
+  BUILTIN_TOOL_POLICIES,
+  mergeToolPolicies,
+  type ToolPolicies,
+  type ToolPoliciesFile,
+} from "./tool-policy.ts";
 
 type RuntimeFilesystemConfig = NonNullable<SandboxRuntimeConfig["filesystem"]>;
 
@@ -29,9 +34,13 @@ export type SandboxConfig = Omit<SandboxRuntimeConfig, "network" | "filesystem">
 
 type NetworkConfig = NonNullable<SandboxConfig["network"]>;
 
-export type SandboxConfigFile = Omit<Partial<SandboxConfig>, "network" | "filesystem"> & {
+export type SandboxConfigFile = Omit<
+  Partial<SandboxConfig>,
+  "network" | "filesystem" | "toolPolicies"
+> & {
   network?: Partial<NetworkConfig>;
   filesystem?: Partial<FilesystemConfig>;
+  toolPolicies?: ToolPoliciesFile;
 };
 
 export const DEFAULT_PERMISSION_PROMPT_TIMEOUT_SECONDS = 10 * 60;
@@ -60,6 +69,9 @@ function mergeObjects(base: SandboxConfig, overrides: SandboxConfigFile): Sandbo
   return {
     ...base,
     ...overrides,
+    // Tool policies use a looser file shape; mergeConfigLayers normalizes and
+    // merges them per tool instead of letting a layer overwrite the map.
+    toolPolicies: base.toolPolicies,
     network: overrides.network
       ? ({ ...base.network, ...overrides.network } as NetworkConfig)
       : base.network,
