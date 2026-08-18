@@ -52,7 +52,6 @@ import {
   promptReadBlock,
   showPermissionPrompt,
   promptWriteBlock,
-  warnIfAllDomainsAllowed,
 } from "./ui.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -151,14 +150,14 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateStatus(
-    ctx: Parameters<typeof warnIfAllDomainsAllowed>[0],
+    ctx: ExtensionContext,
     config: ReturnType<typeof loadConfig>,
   ) {
     ctx.ui.setStatus("sandbox", ctx.ui.theme.fg("accent", formatSandboxStatus(config)));
   }
 
   async function enableSandbox(
-    ctx: Parameters<typeof warnIfAllDomainsAllowed>[0],
+    ctx: ExtensionContext,
     setProxyEnvironment: boolean,
   ): Promise<boolean> {
     if (sandboxEnabled) {
@@ -195,7 +194,6 @@ export default function (pi: ExtensionAPI) {
           );
         }
       }
-      warnIfAllDomainsAllowed(ctx, config);
       updateStatus(ctx, config);
       return true;
     } catch (error) {
@@ -210,7 +208,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function disableSandbox(
-    ctx: Parameters<typeof warnIfAllDomainsAllowed>[0],
+    ctx: ExtensionContext,
   ): Promise<boolean> {
     toolPolicyState = "disabled";
     if (!sandboxEnabled) {
@@ -231,7 +229,7 @@ export default function (pi: ExtensionAPI) {
     return true;
   }
 
-  async function toggleSandbox(ctx: Parameters<typeof warnIfAllDomainsAllowed>[0]): Promise<void> {
+  async function toggleSandbox(ctx: ExtensionContext): Promise<void> {
     if (sandboxEnabled) {
       if (await disableSandbox(ctx)) ctx.ui.notify("Sandbox disabled", "info");
       return;

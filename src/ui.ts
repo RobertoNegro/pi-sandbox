@@ -399,15 +399,6 @@ export function promptWriteBlock(
   return promptFilesystemBlock("write", pi, ctx, path, timeoutSeconds, askRule);
 }
 
-export function warnIfAllDomainsAllowed(ctx: ExtensionContext, config: SandboxConfig): void {
-  if (!allowsAllDomains(config.network?.allowedDomains)) return;
-  ctx.ui.notify(
-    '⚠️ Network sandbox allows all domains because network.allowedDomains contains "*". ' +
-      'Only use this intentionally; remove "*" to restore per-domain prompts.',
-    "warning",
-  );
-}
-
 export function formatSandboxStatus(config: SandboxConfig): string {
   const networkLabel = allowsAllDomains(config.network?.allowedDomains)
     ? "all domains"
